@@ -45,9 +45,10 @@ const markdownComponents: Components = {
 interface PostDetailProps {
   isAdmin: boolean;
   onDelete?: (id: string) => void;
+  onOpenLogin?: () => void;
 }
 
-const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete }) => {
+const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
@@ -198,16 +199,45 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete }) => {
   }
 
   if (error || !post) {
+      // 비로그인 상태 + Post not found = 십중팔구 비공개 초안. 로그인 안내로 분기.
+      const looksLikeDraft = !isAdmin && error === 'Post not found';
+
       return (
           <div className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4">
-              <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">Post Not Found</h2>
-              <p className="text-slate-500 mb-8">{error || "The story you are looking for doesn't exist or has been removed."}</p>
-              <button 
-                onClick={() => navigate('/')}
-                className="bg-black text-white px-6 py-3 rounded-full hover:bg-slate-800 transition-colors"
-              >
-                  Go Home
-              </button>
+              {looksLikeDraft ? (
+                  <>
+                      <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">로그인이 필요합니다</h2>
+                      <p className="text-slate-500 mb-2">이 글은 비공개 초안일 수 있습니다.</p>
+                      <p className="text-slate-400 text-sm mb-8">관리자 로그인 후 다시 시도해 주세요.</p>
+                      <div className="flex gap-3">
+                          {onOpenLogin && (
+                              <button
+                                  onClick={onOpenLogin}
+                                  className="bg-black text-white px-6 py-3 rounded-full hover:bg-slate-800 transition-colors text-sm font-medium"
+                              >
+                                  Sign In
+                              </button>
+                          )}
+                          <button
+                              onClick={() => navigate('/')}
+                              className="bg-white text-slate-700 border border-slate-300 px-6 py-3 rounded-full hover:bg-slate-50 transition-colors text-sm font-medium"
+                          >
+                              Go Home
+                          </button>
+                      </div>
+                  </>
+              ) : (
+                  <>
+                      <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">Post Not Found</h2>
+                      <p className="text-slate-500 mb-8">{error || "The story you are looking for doesn't exist or has been removed."}</p>
+                      <button
+                          onClick={() => navigate('/')}
+                          className="bg-black text-white px-6 py-3 rounded-full hover:bg-slate-800 transition-colors"
+                      >
+                          Go Home
+                      </button>
+                  </>
+              )}
           </div>
       );
   }

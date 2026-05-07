@@ -400,7 +400,11 @@ function App() {
                 } />
 
                 <Route path="/p/:id" element={
-                    <PostDetail isAdmin={isAdmin} onDelete={(id) => handleDeletePost(null, id)} />
+                    <PostDetail
+                        isAdmin={isAdmin}
+                        onDelete={(id) => handleDeletePost(null, id)}
+                        onOpenLogin={() => setIsLoginModalOpen(true)}
+                    />
                 } />
 
                 <Route path="/drafts" element={
