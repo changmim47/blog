@@ -328,9 +328,15 @@ async function notifyTelegram(opts: NotifyOpts): Promise<void> {
 
   let text: string;
   if (opts.success) {
-    const lines = ['✅ 새 블로그 초안 생성', '', `🔑 키워드: ${opts.keyword ?? '(unknown)'}`, `📝 제목: ${opts.title ?? '(unknown)'}`];
-    if (opts.postId && BLOG_URL) {
-      lines.push('', `🔗 ${BLOG_URL}/p/${opts.postId}`);
+    const lines = [
+      '✅ 새 블로그 초안 생성',
+      '',
+      `🔑 키워드: ${opts.keyword ?? '(unknown)'}`,
+      `📝 제목: ${opts.title ?? '(unknown)'}`,
+    ];
+    if (BLOG_URL && opts.postId) {
+      lines.push('', `📄 검토: ${BLOG_URL}/p/${opts.postId}`);
+      lines.push(`📋 모든 초안: ${BLOG_URL}/drafts`);
     } else if (opts.postId) {
       lines.push('', `Post ID: ${opts.postId}`);
     }
