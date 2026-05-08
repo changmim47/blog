@@ -11,6 +11,7 @@ import {
   type OperationsOutput,
   type QaOutput,
 } from './agents';
+import { TelegramReporter } from './telegram';
 
 dotenvConfig({ path: '.env.local' });
 
@@ -169,73 +170,6 @@ function filterDuplicateCandidates(
   });
 }
 
-// =========================== Telegram ===========================
-
-interface NotifyOpts {
-  success: boolean;
-  keyword?: string;
-  title?: string;
-  postId?: string;
-  errorMessage?: string;
-  qaIssues?: { description: string; level: string }[];
-  revisionCount?: number;
-}
-
-async function notifyTelegram(opts: NotifyOpts): Promise<void> {
-  const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-  if (!TOKEN || !CHAT_ID) return;
-
-  const BLOG_URL = (process.env.BLOG_BASE_URL ?? '').replace(/\/$/, '');
-
-  let text: string;
-  if (opts.success) {
-    const lines = [
-      '✅ 새 블로그 초안 생성',
-      '',
-      `🔑 키워드: ${opts.keyword ?? '(unknown)'}`,
-      `📝 제목: ${opts.title ?? '(unknown)'}`,
-    ];
-    if (opts.revisionCount && opts.revisionCount > 0) {
-      lines.push(`🔄 QA 수정 ${opts.revisionCount}회 후 통과`);
-    }
-    if (BLOG_URL && opts.postId) {
-      lines.push('', `📄 검토: ${BLOG_URL}/p/${opts.postId}`);
-      lines.push(`📋 모든 초안: ${BLOG_URL}/drafts`);
-    } else if (opts.postId) {
-      lines.push('', `Post ID: ${opts.postId}`);
-    }
-    text = lines.join('\n');
-  } else {
-    const lines = ['❌ 블로그 초안 생성 실패', ''];
-    if (opts.keyword) lines.push(`🔑 키워드: ${opts.keyword}`);
-    if (opts.errorMessage) lines.push(`💬 ${opts.errorMessage}`);
-    if (opts.qaIssues && opts.qaIssues.length > 0) {
-      lines.push('', 'QA 코멘트:');
-      opts.qaIssues.slice(0, 5).forEach((i) => {
-        lines.push(`- [${i.level}] ${i.description}`);
-      });
-    }
-    if (BLOG_URL) {
-      lines.push('', `📋 실행 기록: ${BLOG_URL}/admin/runs`);
-    }
-    text = lines.join('\n');
-  }
-
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: CHAT_ID, text, disable_web_page_preview: true }),
-    });
-    if (!res.ok) {
-      console.warn(`Telegram notify HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    }
-  } catch (e) {
-    console.warn('Telegram notify failed:', e instanceof Error ? e.message : String(e));
-  }
-}
-
 // =========================== Run Recording ===========================
 
 async function recordFailure(
@@ -372,6 +306,8 @@ ${operations.content_markdown}
 
 // =========================== Main ===========================
 
+const reporter = new TelegramReporter();
+
 async function main() {
   log('Signing in as admin...');
   const { error: authError } = await supabase.auth.signInWithPassword({
@@ -380,6 +316,10 @@ async function main() {
   });
   if (authError) throw new Error(`Auth failed: ${authError.message}`);
   log('✓ Signed in');
+
+  // 진행 메시지 시작
+  await reporter.start();
+  await reporter.update({ marketing: { status: 'in-progress' } });
 
   // 1. Autocomplete pool + dedup
   const pool = await gatherSuggestions();
@@ -399,26 +339,90 @@ async function main() {
 
   // 2. Marketing agent
   const marketing = await runMarketing(candidates, exclusion);
+  await reporter.update({
+    marketing: { status: 'done', keyword: marketing.selected_keyword, intent: marketing.search_intent },
+    operations: { status: 'in-progress', revisionAttempt: 1 },
+  });
 
   // 3. Operations + QA loop
   const agentTrace: Record<string, unknown> = { marketing };
 
   let draft = await runOperations(marketing);
-  let qa = await runQa(draft);
   agentTrace.operations_v1 = draft;
+  await reporter.update({
+    operations: {
+      status: 'done',
+      chars: draft.content_markdown.length,
+      tags: draft.tags.length,
+      revisionAttempt: 1,
+    },
+    qa: { status: 'in-progress', attempt: 1 },
+  });
+
+  let qa = await runQa(draft);
   agentTrace.qa_v1 = qa;
 
+  const revisionHistory: { qaSummary: string; majorCount: number }[] = [];
   let revisionCount = 0;
+
   while (!shouldApproveDespiteAmbiguity(qa) && revisionCount < MAX_REVISIONS) {
     revisionCount++;
+    const majorCount = qa.issues.filter((i) => i.level === 'major').length;
+    const minorCount = qa.issues.filter((i) => i.level === 'minor').length;
+
+    // 이전 시도를 history에 기록하고, 새 revision 진행 상태로 업데이트
+    revisionHistory.push({
+      qaSummary: `(${majorCount} major / ${minorCount} minor)`,
+      majorCount,
+    });
+
+    await reporter.update({
+      qa: {
+        status: 'done',
+        approved: false,
+        majorIssueCount: majorCount,
+        minorIssueCount: minorCount,
+        comment: qa.overall_comment,
+        attempt: revisionCount,
+      },
+      revisionHistory: [...revisionHistory],
+      operations: { status: 'in-progress', revisionAttempt: revisionCount + 1 },
+    });
+
     log(`📝 Revision ${revisionCount}/${MAX_REVISIONS} requested by QA`);
     draft = await runOperations(marketing, { previousDraft: draft, qaFeedback: qa });
-    qa = await runQa(draft);
     agentTrace[`operations_v${revisionCount + 1}`] = draft;
+
+    await reporter.update({
+      operations: {
+        status: 'done',
+        chars: draft.content_markdown.length,
+        tags: draft.tags.length,
+        revisionAttempt: revisionCount + 1,
+      },
+      qa: { status: 'in-progress', attempt: revisionCount + 1 },
+    });
+
+    qa = await runQa(draft);
     agentTrace[`qa_v${revisionCount + 1}`] = qa;
   }
 
   const finalApproved = shouldApproveDespiteAmbiguity(qa);
+  const finalMajorCount = qa.issues.filter((i) => i.level === 'major').length;
+  const finalMinorCount = qa.issues.filter((i) => i.level === 'minor').length;
+
+  // QA 최종 결과 반영
+  await reporter.update({
+    qa: {
+      status: 'done',
+      approved: finalApproved,
+      severity: qa.severity,
+      majorIssueCount: finalMajorCount,
+      minorIssueCount: finalMinorCount,
+      comment: qa.overall_comment,
+      attempt: revisionCount + 1,
+    },
+  });
 
   // 4. If finally rejected, record failure and notify
   if (!finalApproved) {
@@ -434,11 +438,12 @@ async function main() {
         pool,
       }
     );
-    await notifyTelegram({
-      success: false,
-      keyword: marketing.selected_keyword,
-      errorMessage: `QA가 ${MAX_REVISIONS}회 수정 후에도 거절`,
-      qaIssues: qa.issues.map((i) => ({ description: i.description, level: i.level })),
+    await reporter.update({
+      final: {
+        outcome: 'rejected',
+        qaIssues: qa.issues.map((i) => ({ description: i.description, level: i.level })),
+        totalRevisions: revisionCount,
+      },
     });
     process.exit(1);
   }
@@ -484,12 +489,12 @@ async function main() {
   log('');
   log(`✅ Done. Keyword: "${marketing.selected_keyword}". Check /drafts and /admin/runs.`);
 
-  await notifyTelegram({
-    success: true,
-    keyword: marketing.selected_keyword,
-    title: draft.title,
-    postId,
-    revisionCount,
+  await reporter.update({
+    final: {
+      outcome: 'approved',
+      postId,
+      totalRevisions: revisionCount,
+    },
   });
 }
 
@@ -497,6 +502,6 @@ main().catch(async (err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`\n❌ ${msg}`);
   await recordFailure(msg);
-  await notifyTelegram({ success: false, errorMessage: msg });
+  await reporter.sendSimpleError(msg);
   process.exit(1);
 });
