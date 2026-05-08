@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BlogPost } from '../types';
 import { getDraftPosts } from '../services/storage';
+import { TrashIcon } from './Icons';
 
 interface DraftsProps {
   refreshKey: number;
+  onDeletePost: (e: React.MouseEvent, id: string) => void;
 }
 
-const Drafts: React.FC<DraftsProps> = ({ refreshKey }) => {
+const Drafts: React.FC<DraftsProps> = ({ refreshKey, onDeletePost }) => {
   const [drafts, setDrafts] = useState<BlogPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -45,32 +47,42 @@ const Drafts: React.FC<DraftsProps> = ({ refreshKey }) => {
       ) : (
         <div className="flex flex-col gap-4 pb-12">
           {drafts.map((post) => (
-            <Link
+            <div
               key={post.id}
-              to={`/p/${post.id}`}
-              className="block bg-white rounded-xl p-6 border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all"
+              className="relative group bg-white rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                      Draft
-                    </span>
-                    <span className="text-xs text-slate-400 uppercase tracking-wider">{post.type}</span>
-                    <span className="text-xs text-slate-300">·</span>
-                    <span className="text-xs text-slate-400">
-                      {new Date(post.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <h3 className="text-xl font-serif font-medium text-slate-900 mb-1 line-clamp-1">
-                    {post.title || '(제목 없음)'}
-                  </h3>
-                  <p className="text-sm text-slate-500 line-clamp-2 font-light">
-                    {post.summary || '(요약 없음)'}
-                  </p>
+              <Link
+                to={`/p/${post.id}`}
+                className="block p-6 pr-16"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                    Draft
+                  </span>
+                  <span className="text-xs text-slate-400 uppercase tracking-wider">{post.type}</span>
+                  <span className="text-xs text-slate-300">·</span>
+                  <span className="text-xs text-slate-400">
+                    {new Date(post.createdAt).toLocaleDateString()}
+                  </span>
                 </div>
-              </div>
-            </Link>
+                <h3 className="text-xl font-serif font-medium text-slate-900 mb-1 line-clamp-1">
+                  {post.title || '(제목 없음)'}
+                </h3>
+                <p className="text-sm text-slate-500 line-clamp-2 font-light">
+                  {post.summary || '(요약 없음)'}
+                </p>
+              </Link>
+
+              <button
+                type="button"
+                onClick={(e) => onDeletePost(e, post.id)}
+                aria-label="Delete draft"
+                title="Delete draft"
+                className="absolute top-1/2 -translate-y-1/2 right-4 p-2 rounded-full text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <TrashIcon className="w-5 h-5" />
+              </button>
+            </div>
           ))}
         </div>
       )}

@@ -13,9 +13,27 @@ import LoginModal from './components/LoginModal';
 import SectionPage from './components/SectionPage';
 import Drafts from './components/Drafts';
 import AdminRuns from './components/AdminRuns';
-import { PenIcon, LockClosedIcon, LockOpenIcon, MagnifyingGlassIcon, XMarkIcon } from './components/Icons';
+import { PenIcon, LockOpenIcon, MagnifyingGlassIcon, XMarkIcon } from './components/Icons';
 import * as storage from './services/storage';
 import { supabase, checkConnection } from './services/supabaseClient';
+
+// Hidden login route. Going to /login auto-opens the login modal.
+// Already-admin users get redirected home. After successful login, isAdmin flips and we redirect.
+function LoginRoute({ isAdmin, onOpenLogin }: { isAdmin: boolean; onOpenLogin: () => void }) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (isAdmin) {
+      navigate('/', { replace: true });
+    } else {
+      onOpenLogin();
+    }
+  }, [isAdmin, navigate, onOpenLogin]);
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
+    </div>
+  );
+}
 
 function App() {
   const [isInitializing, setIsInitializing] = useState(true);
@@ -46,6 +64,18 @@ function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
+
+  // Keyboard shortcut to open login modal — Cmd/Ctrl + Shift + L
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        if (!isAdmin) setIsLoginModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isAdmin]);
 
   // Initial setup: connection check, auth, visitor stats (no post pre-loading)
   useEffect(() => {
@@ -313,25 +343,43 @@ function App() {
         
         {/* Mobile Menu */}
         {!isSearchOpen && (
-            <div className="md:hidden flex border-t border-slate-100/50">
-                <Link 
-                    to="/gallery"
-                    className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/gallery') ? 'text-black bg-white' : 'text-slate-400'}`}
-                >
-                    Gallery
-                </Link>
-                <Link 
-                    to="/playlist"
-                    className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/playlist') ? 'text-black bg-white' : 'text-slate-400'}`}
-                >
-                    Playlist
-                </Link>
-                <Link 
-                    to="/blog"
-                    className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/blog') ? 'text-black bg-white' : 'text-slate-400'}`}
-                >
-                    Journal
-                </Link>
+            <div className="md:hidden">
+                <div className="flex border-t border-slate-100/50">
+                    <Link
+                        to="/gallery"
+                        className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/gallery') ? 'text-black bg-white' : 'text-slate-400'}`}
+                    >
+                        Gallery
+                    </Link>
+                    <Link
+                        to="/playlist"
+                        className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/playlist') ? 'text-black bg-white' : 'text-slate-400'}`}
+                    >
+                        Playlist
+                    </Link>
+                    <Link
+                        to="/blog"
+                        className={`flex-1 py-4 text-xs font-medium text-center uppercase tracking-widest ${currentPath.includes('/blog') ? 'text-black bg-white' : 'text-slate-400'}`}
+                    >
+                        Journal
+                    </Link>
+                </div>
+                {isAdmin && (
+                    <div className="flex border-t border-slate-100/50 bg-slate-50/50">
+                        <Link
+                            to="/drafts"
+                            className={`flex-1 py-3 text-[11px] font-medium text-center uppercase tracking-widest ${currentPath.includes('/drafts') ? 'text-amber-700 bg-white' : 'text-slate-500'}`}
+                        >
+                            Drafts
+                        </Link>
+                        <Link
+                            to="/admin/runs"
+                            className={`flex-1 py-3 text-[11px] font-medium text-center uppercase tracking-widest ${currentPath.includes('/admin/runs') ? 'text-indigo-700 bg-white' : 'text-slate-500'}`}
+                        >
+                            Runs
+                        </Link>
+                    </div>
+                )}
             </div>
         )}
       </nav>
@@ -408,12 +456,14 @@ function App() {
                 } />
 
                 <Route path="/drafts" element={
-                    isAdmin ? <Drafts refreshKey={refreshKey} /> : <div className="text-center py-20">Access Denied</div>
+                    isAdmin ? <Drafts refreshKey={refreshKey} onDeletePost={handleDeletePost} /> : <div className="text-center py-20">Access Denied</div>
                 } />
 
                 <Route path="/admin/runs" element={
                     isAdmin ? <AdminRuns /> : <div className="text-center py-20">Access Denied</div>
                 } />
+
+                <Route path="/login" element={<LoginRoute isAdmin={isAdmin} onOpenLogin={() => setIsLoginModalOpen(true)} />} />
 
                 <Route path="/privacy" element={<PrivacyPolicy />} />
                 <Route path="/about" element={<About />} />
@@ -462,23 +512,19 @@ function App() {
               <span>Total: <b>{visitorStats.total}</b></span>
           </div>
           
-          <button
-            onClick={isAdmin ? handleLogout : () => setIsLoginModalOpen(true)}
-            aria-label={isAdmin ? "Sign out from admin" : "Open admin login"}
-            className="text-slate-300 hover:text-slate-600 transition-colors text-xs flex items-center gap-2 group"
-          >
-             {isAdmin ? (
-                 <>
-                     <LockOpenIcon className="w-3 h-3 group-hover:text-indigo-600" />
-                     <span>Sign out</span>
-                 </>
-             ) : (
-                 <>
-                     <LockClosedIcon className="w-3 h-3" />
-                     <span>Admin</span>
-                 </>
-             )}
-          </button>
+          {/* Sign out button — only visible when admin is logged in.
+              Login UI is intentionally hidden from anonymous visitors (security).
+              Admin can sign in via /login URL (bookmarkable) or Cmd/Ctrl+Shift+L shortcut. */}
+          {isAdmin && (
+            <button
+              onClick={handleLogout}
+              aria-label="Sign out from admin"
+              className="text-slate-300 hover:text-slate-600 transition-colors text-xs flex items-center gap-2 group"
+            >
+              <LockOpenIcon className="w-3 h-3 group-hover:text-indigo-600" />
+              <span>Sign out</span>
+            </button>
+          )}
         </div>
       </footer>
 
