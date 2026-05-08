@@ -6,7 +6,10 @@ import { GoogleGenAI, Type } from '@google/genai';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// gemini-2.5-flash는 thinking 모드를 완전히 끌 수 없어 출력 토큰을 잡아먹는 문제가 있음.
+// gemini-2.5-flash-lite는 thinking이 없어 빠르고 토큰 효율적이며 품질도 충분.
+// 더 높은 품질 원하면 환경변수로 오버라이드 (예: gemini-2.5-pro, gemini-1.5-pro).
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 const MAX_ATTEMPTS = 4;
