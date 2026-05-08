@@ -1,27 +1,25 @@
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 
-// gemini-2.5-flash는 thinking 모드를 완전히 끌 수 없어 출력 토큰을 잡아먹는 문제가 있음.
-// gemini-2.5-flash-lite는 thinking이 없어 빠르고 토큰 효율적이며 품질도 충분.
-// 더 높은 품질 원하면 환경변수로 오버라이드 (예: gemini-2.5-pro, gemini-1.5-pro).
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+// 환경변수로 모델 변경 가능 (예: claude-haiku-4-5, claude-opus-4-7)
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 const MAX_ATTEMPTS = 4;
 
-let _aiClient: GoogleGenAI | null = null;
-function getClient(): GoogleGenAI {
-  if (!_aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY missing');
-    _aiClient = new GoogleGenAI({ apiKey });
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY missing');
+    _client = new Anthropic({ apiKey });
   }
-  return _aiClient;
+  return _client;
 }
 
 const promptCache = new Map<string, string>();
@@ -33,139 +31,156 @@ async function loadAgentPrompt(name: 'marketing' | 'operations' | 'qa'): Promise
   return content;
 }
 
+// 에이전트별 max_tokens
+// - marketing/qa: 짧은 JSON (1~2k)이라 4096 충분
+// - operations: 한국어 본문 ~3000자 + 메타 = ~6~8k 출력 → 여유 있게 16384
+const DEFAULT_MAX_TOKENS: Record<string, number> = {
+  marketing: 4096,
+  operations: 16384,
+  qa: 4096,
+};
+
 interface CallAgentOptions {
   agentName: 'marketing' | 'operations' | 'qa';
   userPrompt: string;
-  responseSchema: Record<string, unknown>;
-  maxOutputTokens?: number;
+  toolName: string;
+  toolDescription: string;
+  inputSchema: Record<string, unknown>;
+  maxTokens?: number;
   log?: (msg: string) => void;
 }
 
-// 에이전트별 기본 토큰 한도
-// - marketing/qa: 짧은 JSON이라 32k면 충분
-// - operations: 한국어 본문 + 메타 필드 합치면 thinking 포함 시 32k 넘는 경우 발생 → 모델 최대치
-const DEFAULT_MAX_TOKENS: Record<string, number> = {
-  marketing: 32768,
-  operations: 65536,
-  qa: 32768,
-};
-
 export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T> {
-  const { agentName, userPrompt, responseSchema, log } = opts;
-  const maxOutputTokens = opts.maxOutputTokens ?? DEFAULT_MAX_TOKENS[agentName] ?? 32768;
+  const { agentName, userPrompt, toolName, toolDescription, inputSchema, log } = opts;
+  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS[agentName] ?? 4096;
   const systemInstruction = await loadAgentPrompt(agentName);
-  const ai = getClient();
+  const client = getClient();
 
-  const requestConfig = {
-    model: GEMINI_MODEL,
-    contents: userPrompt,
-    config: {
-      systemInstruction,
-      maxOutputTokens,
-      thinkingConfig: { thinkingBudget: 0 },
-      responseMimeType: 'application/json',
-      responseSchema,
-    },
+  const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: maxTokens,
+    system: systemInstruction,
+    tools: [
+      {
+        name: toolName,
+        description: toolDescription,
+        input_schema: inputSchema as Anthropic.Messages.Tool.InputSchema,
+      },
+    ],
+    tool_choice: { type: 'tool', name: toolName },
+    messages: [{ role: 'user', content: userPrompt }],
   };
 
-  let response;
+  let response: Anthropic.Messages.Message | undefined;
   let lastError: unknown;
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      response = await ai.models.generateContent(requestConfig);
+      response = await client.messages.create(requestParams);
       break;
     } catch (e) {
       lastError = e;
       const errStr = e instanceof Error ? e.message : String(e);
+      // Anthropic 재시도 가능 에러: 429 rate_limit, 529 overloaded, 5xx server errors
       const isRetryable =
-        errStr.includes('503') ||
-        errStr.includes('UNAVAILABLE') ||
-        errStr.includes('overloaded') ||
         errStr.includes('429') ||
-        errStr.includes('RESOURCE_EXHAUSTED');
+        errStr.includes('rate_limit') ||
+        errStr.includes('529') ||
+        errStr.includes('overloaded') ||
+        errStr.includes('Overloaded') ||
+        errStr.includes('500') ||
+        errStr.includes('502') ||
+        errStr.includes('503') ||
+        errStr.includes('504');
 
       if (!isRetryable || attempt === MAX_ATTEMPTS) throw e;
 
       const delay = RETRY_DELAYS_MS[attempt - 1] ?? 30_000;
-      log?.(`  ⚠️  [${agentName}] attempt ${attempt}/${MAX_ATTEMPTS} failed: ${errStr.slice(0, 100)}`);
+      log?.(`  ⚠️  [${agentName}] attempt ${attempt}/${MAX_ATTEMPTS} failed: ${errStr.slice(0, 120)}`);
       log?.(`     retrying in ${Math.round(delay / 1000)}s...`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
   if (!response) throw lastError ?? new Error(`[${agentName}] call failed`);
 
-  const finishReason = response.candidates?.[0]?.finishReason;
-  if (finishReason && finishReason !== 'STOP') {
-    throw new Error(`[${agentName}] response truncated (finishReason=${finishReason}). Increase maxOutputTokens.`);
+  // stop_reason 검증
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error(`[${agentName}] response truncated (stop_reason=max_tokens). Increase maxTokens.`);
+  }
+  if (response.stop_reason !== 'tool_use' && response.stop_reason !== 'end_turn') {
+    throw new Error(`[${agentName}] unexpected stop_reason=${response.stop_reason}`);
   }
 
-  const text = response.text;
-  if (!text) throw new Error(`[${agentName}] returned empty response`);
-
-  try {
-    return JSON.parse(text) as T;
-  } catch (e) {
-    throw new Error(`[${agentName}] failed to parse JSON: ${(e as Error).message}\nRaw: ${text.slice(0, 500)}`);
+  // tool_use block에서 input 추출
+  const toolUseBlock = response.content.find((b) => b.type === 'tool_use');
+  if (!toolUseBlock || toolUseBlock.type !== 'tool_use') {
+    const textBlocks = response.content.filter((b) => b.type === 'text');
+    const textPreview = textBlocks.length > 0 && textBlocks[0].type === 'text'
+      ? textBlocks[0].text.slice(0, 300)
+      : '(no text)';
+    throw new Error(`[${agentName}] no tool_use block in response. Text: ${textPreview}`);
   }
+
+  return toolUseBlock.input as T;
 }
 
-// =================== Schemas ===================
+// =================== Schemas (plain JSON Schema) ===================
 
 export const MARKETING_SCHEMA = {
-  type: Type.OBJECT,
+  type: 'object',
   required: ['selected_keyword', 'search_intent', 'target_audience', 'angle', 'key_points', 'reasoning'],
   properties: {
-    selected_keyword: { type: Type.STRING },
-    search_intent: { type: Type.STRING },
-    target_audience: { type: Type.STRING },
-    angle: { type: Type.STRING },
-    key_points: { type: Type.ARRAY, items: { type: Type.STRING } },
-    long_tail_variations: { type: Type.ARRAY, items: { type: Type.STRING } },
-    reasoning: { type: Type.STRING },
+    selected_keyword: { type: 'string' },
+    search_intent: { type: 'string' },
+    target_audience: { type: 'string' },
+    angle: { type: 'string' },
+    key_points: { type: 'array', items: { type: 'string' } },
+    long_tail_variations: { type: 'array', items: { type: 'string' } },
+    reasoning: { type: 'string' },
   },
 };
 
 export const OPERATIONS_SCHEMA = {
-  type: Type.OBJECT,
+  type: 'object',
   required: ['title', 'summary', 'tags', 'content_markdown'],
   properties: {
-    title: { type: Type.STRING },
-    summary: { type: Type.STRING },
-    tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-    content_markdown: { type: Type.STRING },
+    title: { type: 'string' },
+    summary: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    content_markdown: { type: 'string' },
     image_alt_suggestions: {
-      type: Type.ARRAY,
+      type: 'array',
       items: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
-          position: { type: Type.STRING },
-          alt_text: { type: Type.STRING },
+          position: { type: 'string' },
+          alt_text: { type: 'string' },
         },
       },
     },
-    technical_notes: { type: Type.STRING },
+    technical_notes: { type: 'string' },
   },
 };
 
 export const QA_SCHEMA = {
-  type: Type.OBJECT,
+  type: 'object',
   required: ['approved', 'severity', 'issues', 'overall_comment'],
   properties: {
-    approved: { type: Type.BOOLEAN },
-    severity: { type: Type.STRING },
+    approved: { type: 'boolean' },
+    severity: { type: 'string' },
     issues: {
-      type: Type.ARRAY,
+      type: 'array',
       items: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
-          category: { type: Type.STRING },
-          level: { type: Type.STRING },
-          description: { type: Type.STRING },
-          suggestion: { type: Type.STRING },
+          category: { type: 'string' },
+          level: { type: 'string' },
+          description: { type: 'string' },
+          suggestion: { type: 'string' },
         },
       },
     },
-    overall_comment: { type: Type.STRING },
+    overall_comment: { type: 'string' },
   },
 };
 
@@ -212,7 +227,6 @@ export interface QaOutput {
  */
 export function shouldApproveDespiteAmbiguity(qa: QaOutput): boolean {
   if (qa.approved === true) return true;
-  // approved=false 인데 issues가 비어 있거나 major가 하나도 없으면 통과로 처리
   if (!qa.issues || qa.issues.length === 0) return true;
   const hasMajor = qa.issues.some((i) => i.level === 'major');
   if (!hasMajor) return true;

@@ -34,7 +34,7 @@ jobs:
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           SUPABASE_ADMIN_EMAIL: ${{ secrets.SUPABASE_ADMIN_EMAIL }}
           SUPABASE_ADMIN_PASSWORD: ${{ secrets.SUPABASE_ADMIN_PASSWORD }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BLOG_BASE_URL: ${{ secrets.BLOG_BASE_URL }}

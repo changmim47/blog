@@ -19,15 +19,15 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.VITE_SUPABASE_KEY;
 const ADMIN_EMAIL = process.env.SUPABASE_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.SUPABASE_ADMIN_PASSWORD;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_KEY || !ADMIN_EMAIL || !ADMIN_PASSWORD || !GEMINI_API_KEY) {
+if (!SUPABASE_URL || !SUPABASE_KEY || !ADMIN_EMAIL || !ADMIN_PASSWORD || !ANTHROPIC_API_KEY) {
   console.error('❌ Missing required env vars in .env.local:');
   if (!SUPABASE_URL) console.error('  - VITE_SUPABASE_URL');
   if (!SUPABASE_KEY) console.error('  - VITE_SUPABASE_KEY');
   if (!ADMIN_EMAIL) console.error('  - SUPABASE_ADMIN_EMAIL');
   if (!ADMIN_PASSWORD) console.error('  - SUPABASE_ADMIN_PASSWORD');
-  if (!GEMINI_API_KEY) console.error('  - GEMINI_API_KEY');
+  if (!ANTHROPIC_API_KEY) console.error('  - ANTHROPIC_API_KEY');
   process.exit(1);
 }
 
@@ -221,7 +221,9 @@ ${candidatesText}${exclusionText}`;
   const result = await callAgent<MarketingOutput>({
     agentName: 'marketing',
     userPrompt,
-    responseSchema: MARKETING_SCHEMA,
+    toolName: 'submit_marketing_brief',
+    toolDescription: '선정한 키워드와 업무팀 브리핑을 제출',
+    inputSchema: MARKETING_SCHEMA,
     log,
   });
   log(`  ✓ Marketing selected: "${result.selected_keyword}"`);
@@ -270,7 +272,9 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
   const result = await callAgent<OperationsOutput>({
     agentName: 'operations',
     userPrompt,
-    responseSchema: OPERATIONS_SCHEMA,
+    toolName: 'submit_blog_draft',
+    toolDescription: '완성된 블로그 초안을 제출',
+    inputSchema: OPERATIONS_SCHEMA,
     log,
   });
   log(`  ✓ Operations title: ${result.title}`);
@@ -294,7 +298,9 @@ ${operations.content_markdown}
   const result = await callAgent<QaOutput>({
     agentName: 'qa',
     userPrompt,
-    responseSchema: QA_SCHEMA,
+    toolName: 'submit_qa_review',
+    toolDescription: '품질관리팀의 검토 결과를 제출',
+    inputSchema: QA_SCHEMA,
     log,
   });
   log(`  ✓ QA verdict: ${result.approved ? 'APPROVED' : 'REJECTED'} (${result.severity}, ${result.issues.length} issues)`);
