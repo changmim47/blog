@@ -38,10 +38,18 @@ interface CallAgentOptions {
   log?: (msg: string) => void;
 }
 
+// 에이전트별 기본 토큰 한도
+// - marketing/qa: 짧은 JSON이라 32k면 충분
+// - operations: 한국어 본문 + 메타 필드 합치면 thinking 포함 시 32k 넘는 경우 발생 → 모델 최대치
+const DEFAULT_MAX_TOKENS: Record<string, number> = {
+  marketing: 32768,
+  operations: 65536,
+  qa: 32768,
+};
+
 export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T> {
-  // gemini-2.5-flash가 thinkingBudget=0 설정에도 일부 thinking 토큰을 출력에 포함시키는 케이스가 있어
-  // 넉넉하게 32768로 기본값 설정. 모델 최대치(65536)의 절반이라 비용/지연 부담 X.
-  const { agentName, userPrompt, responseSchema, maxOutputTokens = 32768, log } = opts;
+  const { agentName, userPrompt, responseSchema, log } = opts;
+  const maxOutputTokens = opts.maxOutputTokens ?? DEFAULT_MAX_TOKENS[agentName] ?? 32768;
   const systemInstruction = await loadAgentPrompt(agentName);
   const ai = getClient();
 
