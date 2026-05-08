@@ -40,12 +40,36 @@
 - 너무 일반적이라 차별점 만들기 어려움 (예: 단순 "ChatGPT")
 - 비전공자가 다루기엔 너무 기술적 (예: "GPT 파인튜닝 코드")
 
+## 키워드 표기 규칙 (selected_keyword에 적용)
+
+한국 사용자는 검색 시 한국어를 더 많이 사용합니다. Autocomplete가 영어 후보를 반환했더라도, 그 의미를 한국어로 자연스럽게 옮길 수 있다면 변환할 것:
+
+### 변환 원칙
+1. **브랜드/제품 공식명**은 영어 그대로 유지하되, **첫 글자는 항상 대문자로** 표기:
+   - `gemini` → `Gemini`
+   - `chatgpt` → `ChatGPT` (이미 표준)
+   - `openai` → `OpenAI`
+   - `claude` → `Claude`
+   - `midjourney` → `MidJourney`
+   - 약어는 전부 대문자: `api` → `API`, `ai` → `AI`, `llm` → `LLM`, `rag` → `RAG`
+2. **설명/속성/형용사 부분은 한국어로 변환**:
+   - `gemini student 1 year free` → `Gemini 대학생 1년 무료`
+   - `claude api pricing` → `Claude API 요금`
+   - `chatgpt how to use` → `ChatGPT 사용법`
+   - `midjourney v7 release` → `MidJourney V7 출시`
+3. **이미 한국어가 섞여 있으면**: 영어 부분만 위 규칙 적용 (`chatgpt 사용법` → `ChatGPT 사용법`)
+
+### 주의
+- 의미가 완전히 달라지지 않게 자연스럽게 옮길 것
+- 검색 의도가 모호해지는 직역은 피할 것 (예: "open source AI"를 "열린 소스 AI"로 무리하게 옮기지 말 것 — 이미 굳어진 영어 용어는 유지)
+- 변환 결과가 한국어 사용자가 실제로 검색할 법한 자연스러운 표현이어야 함
+
 ## 출력
 JSON 스키마 정확히 따를 것. 모든 값 한국어.
 
 ```json
 {
-  "selected_keyword": "후보 풀에서 선정한 키워드 정확히 그대로",
+  "selected_keyword": "위 [키워드 표기 규칙]에 따라 한국어 우선 + 영어 첫글자 대문자로 변환된 키워드",
   "search_intent": "사용자가 이 키워드로 검색할 때 진짜 알고 싶어 하는 것 (1~2문장)",
   "target_audience": "이 글의 타겟 독자 (1문장)",
   "angle": "다른 비슷한 글들과 차별화되는 우리 글의 각도 (1~2문장)",

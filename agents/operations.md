@@ -76,6 +76,19 @@
 
 (굵게 `**`, 기울임 `*`, 코드 블록 \`\`\`, 이미지 `![]()`, 외부 링크는 모두 금지)
 
+### 9. 영어 단어 표기 규칙
+본문, 제목, 요약, 헤딩 어디든 등장하는 모든 영어 단어는 **첫 글자를 대문자**로 작성:
+- `chatgpt` → `ChatGPT`
+- `gemini` → `Gemini`
+- `claude` → `Claude`
+- `openai` → `OpenAI`
+- `anthropic` → `Anthropic`
+- `midjourney` → `MidJourney`
+- `notion` → `Notion`
+- 약어는 전부 대문자: `api` → `API`, `ai` → `AI`, `llm` → `LLM`, `rag` → `RAG`, `seo` → `SEO`, `pdf` → `PDF`
+- 한국어 사이에 있어도 동일 적용 (예: "ChatGPT를 처음 써봤어요", "AI 도구 비교")
+- 마케팅팀이 전달한 selected_keyword에 이미 적용되어 있으니, 그 표기를 유지하면 됨
+
 ---
 
 ## QA 피드백 처리 (재작성 시)
