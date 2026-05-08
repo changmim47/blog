@@ -183,9 +183,14 @@ function App() {
   };
 
   const handleLogout = async () => {
-      await supabase.auth.signOut();
-      alert('로그아웃 되었습니다.');
-      navigate('/');
+      try {
+          await supabase.auth.signOut();
+      } catch (e) {
+          console.error('Logout error:', e);
+      }
+      // 강제 새로고침 — 사파리 ITP 등으로 state가 즉시 안 비워지는 케이스 방지.
+      // 동시에 사용자에게도 명확한 피드백이 됨.
+      window.location.href = '/';
   };
 
   // Determine Write Link based on current section
