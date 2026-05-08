@@ -38,6 +38,68 @@ interface Candidate {
 }
 
 const AUTOCOMPLETE_DELAY_MS = 100;
+const DEDUP_LOOKBACK_DAYS = 30;
+
+interface ExclusionList {
+  titles: string[];   // 최근 글 제목 (drafts + published)
+  keywords: string[]; // 최근 generation_runs에서 선정된 키워드
+}
+
+async function fetchRecentTopics(daysBack: number): Promise<ExclusionList> {
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+  const sinceMs = since.getTime();
+
+  const { data: posts } = await supabase
+    .from('posts')
+    .select('title')
+    .gte('createdAt', sinceMs)
+    .order('createdAt', { ascending: false })
+    .limit(100);
+
+  const { data: runs } = await supabase
+    .from('generation_runs')
+    .select('keyword')
+    .eq('status', 'success')
+    .gte('created_at', since.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  return {
+    titles: (posts ?? []).map((p) => p.title).filter((t): t is string => !!t),
+    keywords: (runs ?? []).map((r) => r.keyword).filter((k): k is string => !!k),
+  };
+}
+
+const normalizeForCompare = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+
+function filterDuplicateCandidates(
+  candidates: Candidate[],
+  exclusion: ExclusionList
+): Candidate[] {
+  const recentKeywordsNorm = new Set(exclusion.keywords.map(normalizeForCompare));
+  const recentTitlesNorm = exclusion.titles.map(normalizeForCompare);
+
+  return candidates.filter((c) => {
+    const candNorm = normalizeForCompare(c.keyword);
+
+    // 완전 일치
+    if (recentKeywordsNorm.has(candNorm)) return false;
+
+    // 부분 일치 (의미 있는 길이 6자 이상일 때만)
+    for (const recentNorm of recentKeywordsNorm) {
+      if (recentNorm.length < 6) continue;
+      if (candNorm.includes(recentNorm) || recentNorm.includes(candNorm)) return false;
+    }
+
+    // 제목과 부분 일치 — 제목은 더 길어서 더 엄격
+    for (const titleNorm of recentTitlesNorm) {
+      if (candNorm.length >= 6 && titleNorm.includes(candNorm)) return false;
+    }
+
+    return true;
+  });
+}
 
 async function fetchAutocomplete(query: string): Promise<string[]> {
   try {
@@ -127,12 +189,35 @@ const MAX_CANDIDATES_FOR_PROMPT = 50;
 
 async function generateWithGemini(
   candidates: Candidate[],
-  pool: SeedSuggestions[]
+  pool: SeedSuggestions[],
+  exclusion: ExclusionList
 ): Promise<GeminiOutput> {
   const top = candidates.slice(0, MAX_CANDIDATES_FOR_PROMPT);
   const candidatesText = top
     .map((c, i) => `${i + 1}. ${c.keyword} (시드: ${c.seed})`)
     .join('\n');
+
+  const exclusionSection =
+    exclusion.titles.length > 0 || exclusion.keywords.length > 0
+      ? `
+
+[중복 회피 - 절대 같은 주제로 작성하지 말 것]
+아래는 최근 ${DEDUP_LOOKBACK_DAYS}일간 이미 작성된 글의 제목과 사용된 키워드입니다.
+선정 키워드와 글 내용 모두 이들과 겹치면 안 됩니다.
+
+▣ 최근 글 제목:
+${exclusion.titles.slice(0, 30).map((t, i) => `${i + 1}. ${t}`).join('\n') || '(없음)'}
+
+▣ 최근 사용된 키워드:
+${exclusion.keywords.slice(0, 30).map((k, i) => `${i + 1}. ${k}`).join('\n') || '(없음)'}
+
+위 목록과 다음 중 하나라도 해당되면 그 후보는 제외:
+- 키워드가 의미적으로 동일/유사
+- 같은 도구/개념의 같은 측면을 다룸 (예: "ChatGPT 구독취소"가 이미 있다면 "ChatGPT 결제 해지" 같은 사실상 같은 주제도 제외)
+- 글 내용이 위 제목들과 겹칠 수밖에 없는 키워드
+
+선정 후, 글 작성 시에도 위 제목들과 본문 내용/예시/구성이 겹치지 않게 새로운 각도로 작성할 것.`
+      : '';
 
   const prompt = `당신은 한국어 SEO 블로그 작가입니다. Google 자동완성 후보 키워드에서 SEO 가치 있는 주제를 선정해 자연스러운 한국어 글을 씁니다.
 
@@ -143,6 +228,7 @@ async function generateWithGemini(
 
 [후보 키워드 ${top.length}개 - Google 자동완성, 시드별 표시]
 ${candidatesText}
+${exclusionSection}
 
 ═══════════════════════════════════════════
 작업 1. 키워드 선정
@@ -369,14 +455,21 @@ async function main() {
   log('✓ Signed in');
 
   const pool = await gatherSuggestions();
-  const candidates = buildCandidates(pool);
-  log(`Built ${candidates.length} unique candidates after dedup/filter`);
+  const allCandidates = buildCandidates(pool);
+  log(`Built ${allCandidates.length} unique candidates after dedup/filter`);
+
+  log(`Fetching recent post topics (last ${DEDUP_LOOKBACK_DAYS} days) to avoid duplicates...`);
+  const exclusion = await fetchRecentTopics(DEDUP_LOOKBACK_DAYS);
+  log(`  ✓ Found ${exclusion.titles.length} recent posts, ${exclusion.keywords.length} recent keywords`);
+
+  const candidates = filterDuplicateCandidates(allCandidates, exclusion);
+  log(`Filtered out ${allCandidates.length - candidates.length} candidates overlapping with recent posts. ${candidates.length} remain.`);
 
   if (candidates.length === 0) {
-    throw new Error('No candidates available — autocomplete returned nothing usable');
+    throw new Error('No non-duplicate candidates available. Try expanding seed pool or wait until older posts roll off.');
   }
 
-  const generated = await generateWithGemini(candidates, pool);
+  const generated = await generateWithGemini(candidates, pool, exclusion);
 
   const postId = `auto-${Date.now()}`;
   const post = {
