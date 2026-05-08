@@ -183,13 +183,28 @@ function App() {
   };
 
   const handleLogout = async () => {
+      // 1. Supabase 표준 로그아웃 (scope: 'local' = 서버 호출 없이 로컬만 정리,
+      //    사파리가 네트워크 호출을 막거나 느릴 때 더 안정적)
       try {
-          await supabase.auth.signOut();
+          await supabase.auth.signOut({ scope: 'local' });
       } catch (e) {
           console.error('Logout error:', e);
       }
-      // 강제 새로고침 — 사파리 ITP 등으로 state가 즉시 안 비워지는 케이스 방지.
-      // 동시에 사용자에게도 명확한 피드백이 됨.
+
+      // 2. 사파리 ITP 안전장치 — Supabase 세션 키를 localStorage에서 강제 제거.
+      //    signOut이 어떤 이유로 실패해도 다음 로드에서 절대 자동 로그인 못 하게.
+      try {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+              const key = localStorage.key(i);
+              if (key && (key.startsWith('sb-') || key.includes('supabase'))) {
+                  localStorage.removeItem(key);
+              }
+          }
+      } catch (e) {
+          console.error('Storage cleanup error:', e);
+      }
+
+      // 3. 강제 새로고침
       window.location.href = '/';
   };
 
