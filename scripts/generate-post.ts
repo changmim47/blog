@@ -247,6 +247,7 @@ ${candidatesText}${exclusionText}`;
     toolName: 'submit_marketing_brief',
     toolDescription: '선정한 키워드와 업무팀 브리핑을 제출',
     inputSchema: MARKETING_SCHEMA,
+    webSearchMaxUses: 2, // 트렌드/최신성 가볍게 확인
     log,
   });
   log(`  ✓ Marketing selected: "${result.selected_keyword}"`);
@@ -298,6 +299,7 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     toolName: 'submit_blog_draft',
     toolDescription: '완성된 블로그 초안을 제출',
     inputSchema: OPERATIONS_SCHEMA,
+    webSearchMaxUses: 5, // 본문 작성 — 최신 가격/모델/정책 확인 위해 충분히
     log,
   });
   log(`  ✓ Operations title: ${result.title}`);

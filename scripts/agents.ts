@@ -47,27 +47,45 @@ interface CallAgentOptions {
   toolDescription: string;
   inputSchema: Record<string, unknown>;
   maxTokens?: number;
+  /**
+   * web_search 도구 활성화 + 최대 사용 횟수.
+   * undefined/0이면 비활성. 활성 시 에이전트가 최신 정보를 실시간 검색 가능.
+   * 비용: $10/1000 searches ≈ $0.01/search.
+   */
+  webSearchMaxUses?: number;
   log?: (msg: string) => void;
 }
 
 export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T> {
-  const { agentName, userPrompt, toolName, toolDescription, inputSchema, log } = opts;
+  const { agentName, userPrompt, toolName, toolDescription, inputSchema, webSearchMaxUses, log } = opts;
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS[agentName] ?? 4096;
   const systemInstruction = await loadAgentPrompt(agentName);
   const client = getClient();
+
+  // 도구 구성: 항상 custom output 도구 + 선택적으로 web_search
+  const tools: Anthropic.Messages.ToolUnion[] = [
+    {
+      name: toolName,
+      description: toolDescription,
+      input_schema: inputSchema as Anthropic.Messages.Tool.InputSchema,
+    },
+  ];
+  if (webSearchMaxUses && webSearchMaxUses > 0) {
+    tools.push({
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: webSearchMaxUses,
+    } as unknown as Anthropic.Messages.ToolUnion);
+  }
 
   const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
     model: ANTHROPIC_MODEL,
     max_tokens: maxTokens,
     system: systemInstruction,
-    tools: [
-      {
-        name: toolName,
-        description: toolDescription,
-        input_schema: inputSchema as Anthropic.Messages.Tool.InputSchema,
-      },
-    ],
-    tool_choice: { type: 'tool', name: toolName },
+    tools,
+    // web_search 활성 시 'auto'로 두어야 모델이 검색 후 custom tool 호출 가능.
+    // 비활성 시 강제 호출로 안정성 확보.
+    tool_choice: webSearchMaxUses ? { type: 'auto' } : { type: 'tool', name: toolName },
     messages: [{ role: 'user', content: userPrompt }],
   };
 
@@ -107,19 +125,30 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
   if (response.stop_reason === 'max_tokens') {
     throw new Error(`[${agentName}] response truncated (stop_reason=max_tokens). Increase maxTokens.`);
   }
-  if (response.stop_reason !== 'tool_use' && response.stop_reason !== 'end_turn') {
+  if (response.stop_reason !== 'tool_use' && response.stop_reason !== 'end_turn' && response.stop_reason !== 'pause_turn') {
     throw new Error(`[${agentName}] unexpected stop_reason=${response.stop_reason}`);
   }
 
-  // tool_use block에서 input 추출
-  const toolUseBlock = response.content.find((b) => b.type === 'tool_use');
+  // web_search가 켜졌을 경우 server_tool_use(검색 쿼리), web_search_tool_result(검색 결과) 블록도 섞여 옴.
+  // 우리가 원하는 건 custom tool인 toolName의 호출.
+  const toolUseBlock = response.content.find(
+    (b) => b.type === 'tool_use' && b.name === toolName
+  );
   if (!toolUseBlock || toolUseBlock.type !== 'tool_use') {
+    // 검색 횟수 로깅 (디버깅용)
+    const searchCount = response.content.filter((b) => b.type === 'server_tool_use').length;
+    if (searchCount > 0) log?.(`  ℹ️  [${agentName}] performed ${searchCount} web searches`);
+
     const textBlocks = response.content.filter((b) => b.type === 'text');
     const textPreview = textBlocks.length > 0 && textBlocks[0].type === 'text'
       ? textBlocks[0].text.slice(0, 300)
       : '(no text)';
-    throw new Error(`[${agentName}] no tool_use block in response. Text: ${textPreview}`);
+    throw new Error(`[${agentName}] no '${toolName}' tool_use block in response (stop_reason=${response.stop_reason}). Text: ${textPreview}`);
   }
+
+  // 디버깅: 웹 검색 사용 횟수 로깅
+  const searchCount = response.content.filter((b) => b.type === 'server_tool_use').length;
+  if (searchCount > 0) log?.(`  🌐 [${agentName}] used ${searchCount} web search(es)`);
 
   return toolUseBlock.input as T;
 }
