@@ -38,6 +38,29 @@ const AUTOCOMPLETE_DELAY_MS = 100;
 const DEDUP_LOOKBACK_DAYS = 30;
 const MAX_REVISIONS = 2;
 
+// 모든 에이전트 호출에 prepend되는 현재 시점 정보.
+// LLM은 학습 시점을 기본 가정하므로 명시적으로 주입해야 작년 데이터를 최신으로 오인하지 않음.
+function buildCurrentContext(): string {
+  const now = new Date();
+  const koreanDate = now.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  });
+  const isoDate = now.toISOString().split('T')[0];
+  const year = now.getFullYear();
+  return `[현재 시점 정보 — 반드시 이 기준으로 작성]
+- 오늘 날짜: ${koreanDate} (${isoDate})
+- 현재 연도: ${year}년
+- 글에 등장하는 모든 시간/날짜 관련 표현 ("최근", "올해", "현재", "작년", "지난달", "이번 분기" 등)은 위 날짜를 기준으로 작성할 것
+- 학습 데이터의 시점(예: 2024년)을 기준 삼지 말 것
+- 정확히 모르는 최신 통계/이벤트/버전은 추측하지 말고 시점 언급을 피하거나 "최근", "현재" 같이 모호하게 쓸 것
+- 출시 연도, 가격, 정책 등 시간에 민감한 사실을 단정하기 어렵다면 "${year}년 기준" 같은 한정어 사용 또는 일반론으로 우회
+
+`;
+}
+
 // =========================== Autocomplete ===========================
 
 interface SeedSuggestions {
@@ -214,7 +237,7 @@ ${exclusion.titles.slice(0, 30).map((t, i) => `${i + 1}. ${t}`).join('\n') || '(
 ${exclusion.keywords.slice(0, 30).map((k, i) => `${i + 1}. ${k}`).join('\n') || '(없음)'}`
       : '';
 
-  const userPrompt = `[후보 키워드 ${top.length}개]
+  const userPrompt = `${buildCurrentContext()}[후보 키워드 ${top.length}개]
 ${candidatesText}${exclusionText}`;
 
   log('🎯 Marketing agent — selecting topic...');
@@ -261,7 +284,7 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
 위 이슈를 반영하되, 잘 쓴 부분은 보존할 것. 전체를 갈아엎지 말 것.`
     : '';
 
-  const userPrompt = briefingText + revisionText;
+  const userPrompt = buildCurrentContext() + briefingText + revisionText;
 
   if (revision) {
     log('✍️  Operations agent — revising draft...');
@@ -283,7 +306,7 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
 }
 
 async function runQa(operations: OperationsOutput): Promise<QaOutput> {
-  const userPrompt = `[검토 대상 초안]
+  const userPrompt = `${buildCurrentContext()}[검토 대상 초안]
 제목: ${operations.title}
 요약: ${operations.summary}
 태그: ${operations.tags.join(', ')}
