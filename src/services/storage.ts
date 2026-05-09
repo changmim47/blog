@@ -47,6 +47,24 @@ export const togglePublished = async (id: string, value: boolean): Promise<void>
     console.error('Error toggling published:', error);
     throw error;
   }
+  // 발행/언발행 시 Render 재빌드 트리거 → sitemap.xml 갱신
+  await triggerRebuild();
+};
+
+/**
+ * Render Deploy Hook을 호출해 사이트 재빌드를 트리거.
+ * Supabase RPC 경유 (Deploy Hook URL은 Postgres 함수 안에 숨겨져 브라우저에 노출 안 됨).
+ * 실패해도 메인 작업에는 영향 X.
+ */
+export const triggerRebuild = async (): Promise<void> => {
+  try {
+    const { error } = await supabase.rpc('trigger_render_rebuild');
+    if (error) {
+      console.warn('Rebuild trigger failed (non-critical):', error.message);
+    }
+  } catch (e) {
+    console.warn('Rebuild trigger error (non-critical):', e);
+  }
 };
 
 export const getGenerationRuns = async (limit = 50): Promise<GenerationRun[]> => {
@@ -127,6 +145,11 @@ export const savePost = async (post: BlogPost): Promise<void> => {
     console.error('Error saving post:', error);
     throw error;
   }
+  // 발행 상태 글 저장/수정 시 sitemap 갱신 위해 재빌드.
+  // 초안(published=false)은 sitemap에 없으니 트리거 안 함.
+  if (post.published) {
+    await triggerRebuild();
+  }
 };
 
 export const deletePost = async (id: string): Promise<void> => {
@@ -190,6 +213,11 @@ export const deletePost = async (id: string): Promise<void> => {
   if (error) {
     console.error('Error deleting post:', error);
     throw error;
+  }
+  // 발행됐던 글이 삭제되면 sitemap에서도 빠져야 하므로 재빌드.
+  // (초안 삭제도 트리거되지만 빈도 낮고 문제 없음)
+  if (post && post.published !== false) {
+    await triggerRebuild();
   }
 };
 
