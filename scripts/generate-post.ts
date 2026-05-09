@@ -137,6 +137,45 @@ function buildCandidates(pool: SeedSuggestions[]): Candidate[] {
   return candidates;
 }
 
+// =========================== Unsplash Cover Image ===========================
+
+async function fetchUnsplashImage(query: string): Promise<string | null> {
+  const ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
+  if (!ACCESS_KEY) {
+    log('  ℹ️  UNSPLASH_ACCESS_KEY not set, skipping Unsplash');
+    return null;
+  }
+  if (!query || !query.trim()) return null;
+
+  try {
+    const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&orientation=landscape&per_page=1&content_filter=high`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Client-ID ${ACCESS_KEY}` },
+    });
+    if (!res.ok) {
+      console.warn(`Unsplash HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return null;
+    }
+    const json = (await res.json()) as { results?: Array<{ urls?: { regular?: string } }> };
+    const first = json.results?.[0];
+    return first?.urls?.regular ?? null;
+  } catch (e) {
+    console.warn('Unsplash fetch failed:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+async function pickCoverImage(query: string): Promise<string> {
+  log(`📸 Fetching cover image: "${query}"`);
+  const unsplashUrl = await fetchUnsplashImage(query);
+  if (unsplashUrl) {
+    log(`  ✓ Unsplash matched`);
+    return unsplashUrl;
+  }
+  log(`  ⚠️  Unsplash returned no result — falling back to picsum`);
+  return `https://picsum.photos/800/400?random=${Date.now()}`;
+}
+
 // =========================== Deduplication ===========================
 
 interface ExclusionList {
@@ -479,7 +518,10 @@ async function main() {
     process.exit(1);
   }
 
-  // 5. Insert approved draft
+  // 5. Cover image (Unsplash → fallback picsum)
+  const coverImage = await pickCoverImage(marketing.cover_image_query);
+
+  // 6. Insert approved draft
   const postId = `auto-${Date.now()}`;
   const post = {
     id: postId,
@@ -489,7 +531,7 @@ async function main() {
     summary: draft.summary,
     tags: draft.tags,
     createdAt: Date.now(),
-    coverImage: `https://picsum.photos/800/400?random=${Date.now()}`,
+    coverImage,
     contentImages: [],
     audioUrl: '',
     likes: 0,

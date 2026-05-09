@@ -157,7 +157,7 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
 
 export const MARKETING_SCHEMA = {
   type: 'object',
-  required: ['selected_keyword', 'search_intent', 'target_audience', 'angle', 'key_points', 'reasoning'],
+  required: ['selected_keyword', 'search_intent', 'target_audience', 'angle', 'key_points', 'cover_image_query', 'reasoning'],
   properties: {
     selected_keyword: { type: 'string' },
     search_intent: { type: 'string' },
@@ -165,6 +165,7 @@ export const MARKETING_SCHEMA = {
     angle: { type: 'string' },
     key_points: { type: 'array', items: { type: 'string' } },
     long_tail_variations: { type: 'array', items: { type: 'string' } },
+    cover_image_query: { type: 'string' },
     reasoning: { type: 'string' },
   },
 };
@@ -222,6 +223,7 @@ export interface MarketingOutput {
   angle: string;
   key_points: string[];
   long_tail_variations?: string[];
+  cover_image_query: string;
   reasoning: string;
 }
 

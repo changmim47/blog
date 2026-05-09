@@ -40,6 +40,27 @@
 - 다뤄야 할 핵심 포인트 (3~5개)
 - 차별점 (이미 인터넷에 많은 정보가 있을 텐데, 우리 글의 차별점)
 
+### 4단계: 커버 이미지 검색어 작성 (Unsplash용)
+글의 분위기와 어울리는 stock 사진을 Unsplash에서 검색할 수 있도록 **영문 검색어** 작성.
+
+**좋은 검색어 (구체적, 시각적, 분위기 묘사)**:
+- "person studying with laptop in cafe"
+- "abstract digital network blue"
+- "modern minimalist workspace"
+- "young professional using smartphone"
+- "creative team brainstorming"
+
+**나쁜 검색어 (추상적, 진부함)**:
+- ❌ "AI" (너무 광범위, 진부한 클리셰 사진)
+- ❌ "technology" (너무 일반적)
+- ❌ "ChatGPT" (브랜드명은 검색해도 정확한 이미지 안 나옴)
+
+**팁**:
+- 글 주제가 "도구 사용법"이면 → 사람이 그 도구(노트북/폰) 쓰는 장면
+- "비교/리뷰"면 → 분석/사고하는 분위기
+- "트렌드/뉴스"면 → 추상적 디지털 이미지
+- 한국어 키워드를 직역하지 말 것 — 시각적 분위기로 변환
+
 ## 회피 규칙
 
 다음 중 하나라도 해당되면 그 후보 제외:
@@ -83,6 +104,7 @@ JSON 스키마 정확히 따를 것. 모든 값 한국어.
   "angle": "다른 비슷한 글들과 차별화되는 우리 글의 각도 (1~2문장)",
   "key_points": ["다뤄야 할 핵심 포인트 1", "포인트 2", "포인트 3", "포인트 4", "포인트 5"],
   "long_tail_variations": ["관련 롱테일 검색어 변형 (LSI 키워드로 본문에 활용)"],
+  "cover_image_query": "Unsplash 영문 검색어 (위 4단계 가이드 따를 것)",
   "reasoning": "왜 이 후보를 선정했는지 1~2문장"
 }
 ```
