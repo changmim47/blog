@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && tsx scripts/generate-sitemap-rss.ts",
     "preview": "vite preview",
     "generate-post": "tsx scripts/generate-post.ts"
   },
@@ -17,7 +17,8 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.9.6",
-    "react-simplemde-editor": "^5.2.0"
+    "react-simplemde-editor": "^5.2.0",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
@@ -25,7 +26,6 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "dotenv": "^17.4.2",
-    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
