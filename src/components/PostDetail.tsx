@@ -93,42 +93,95 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
       initPost();
   }, [id]);
 
-  // Update SEO and Like state when 'post' is set
+  // Update SEO + structured data + like state when 'post' is set
   useEffect(() => {
       if (!post) return;
 
-      // SEO: Update Title & Description
+      const cleanups: Array<() => void> = [];
+
+      // === Title ===
+      const prevTitle = document.title;
       document.title = `${post.title} | My Space`;
+      cleanups.push(() => { document.title = prevTitle; });
+
+      // === Existing meta description: 값만 바꾸고 cleanup에서 복구 ===
       const metaDesc = document.querySelector('meta[name="description"]');
-      if (metaDesc) metaDesc.setAttribute('content', post.summary || 'A post on My Space');
+      const prevDesc = metaDesc?.getAttribute('content') ?? '';
+      metaDesc?.setAttribute('content', post.summary || 'A post on My Space');
+      cleanups.push(() => metaDesc?.setAttribute('content', prevDesc));
 
-      // SEO: Update Open Graph
-      let metaOgTitle = document.querySelector('meta[property="og:title"]');
-      if (!metaOgTitle) {
-            metaOgTitle = document.createElement('meta');
-            metaOgTitle.setAttribute('property', 'og:title');
-            document.head.appendChild(metaOgTitle);
-      }
-      metaOgTitle.setAttribute('content', post.title);
-      
-      if (post.coverImage) {
-            let metaOgImage = document.querySelector('meta[property="og:image"]');
-            if (!metaOgImage) {
-                metaOgImage = document.createElement('meta');
-                metaOgImage.setAttribute('property', 'og:image');
-                document.head.appendChild(metaOgImage);
-            }
-            metaOgImage.setAttribute('content', post.coverImage);
-      }
+      // === OG / Twitter / 기타 동적 meta — 새로 만들고 cleanup에서 제거 ===
+      const createdEls: Element[] = [];
+      const addMeta = (attr: 'property' | 'name', key: string, content: string) => {
+        if (!content) return;
+        const el = document.createElement('meta');
+        el.setAttribute(attr, key);
+        el.setAttribute('content', content);
+        document.head.appendChild(el);
+        createdEls.push(el);
+      };
 
+      const pageUrl = window.location.href;
+      addMeta('property', 'og:type', 'article');
+      addMeta('property', 'og:url', pageUrl);
+      addMeta('property', 'og:title', post.title);
+      addMeta('property', 'og:description', post.summary || '');
+      addMeta('property', 'og:site_name', 'My Space');
+      if (post.coverImage) addMeta('property', 'og:image', post.coverImage);
+
+      addMeta('name', 'twitter:card', 'summary_large_image');
+      addMeta('name', 'twitter:title', post.title);
+      addMeta('name', 'twitter:description', post.summary || '');
+      if (post.coverImage) addMeta('name', 'twitter:image', post.coverImage);
+
+      // === Schema.org JSON-LD (BlogPosting) ===
+      const publishedIso = new Date(post.createdAt).toISOString();
+      const jsonLd: Record<string, unknown> = {
+        '@context': 'https://schema.org',
+        '@type': 'BlogPosting',
+        headline: post.title,
+        description: post.summary || '',
+        datePublished: publishedIso,
+        dateModified: publishedIso,
+        author: {
+          '@type': 'Person',
+          name: 'My Space',
+        },
+        publisher: {
+          '@type': 'Organization',
+          name: 'My Space',
+          logo: {
+            '@type': 'ImageObject',
+            url: `${window.location.origin}/favicon.svg`,
+          },
+        },
+        mainEntityOfPage: {
+          '@type': 'WebPage',
+          '@id': pageUrl,
+        },
+      };
+      if (post.coverImage) jsonLd.image = post.coverImage;
+      if (post.tags && post.tags.length > 0) jsonLd.keywords = post.tags.join(', ');
+
+      const script = document.createElement('script');
+      script.type = 'application/ld+json';
+      script.textContent = JSON.stringify(jsonLd);
+      document.head.appendChild(script);
+      createdEls.push(script);
+
+      cleanups.push(() => {
+        createdEls.forEach((el) => el.parentNode?.removeChild(el));
+      });
+
+      // === Like state ===
       const liked = localStorage.getItem(`liked_${post.id}`);
       if (liked) setIsLiked(true);
       setLikes(post.likes || 0);
       setShowFloatingBar(true);
 
       return () => {
-          document.title = "My Space";
-      }
+          cleanups.forEach((fn) => fn());
+      };
   }, [post]);
 
   const handleLike = async () => {
