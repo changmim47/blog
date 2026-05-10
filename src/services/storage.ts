@@ -120,6 +120,67 @@ export const getRecentPosts = async (type: PostType, limit: number): Promise<Blo
   return posts;
 };
 
+/**
+ * 현재 글과 관련된 다른 발행글을 가져옴.
+ * 1순위: 태그가 하나 이상 겹치는 글 — 겹친 태그 수가 많은 순으로 정렬
+ * 폴백: 같은 type의 최신 발행글
+ */
+export const getRelatedPosts = async (
+  currentId: string,
+  tags: string[],
+  type: PostType,
+  limit = 3
+): Promise<BlogPost[]> => {
+  // 태그 없으면 같은 type의 최근 글로 폴백
+  if (!tags || tags.length === 0) {
+    const { posts } = await getPostsPaginated(type, limit + 1, 0);
+    return posts.filter((p) => p.id !== currentId).slice(0, limit);
+  }
+
+  // 태그 겹치는 글 후보 (현재 글 제외, 발행된 것만, 같은 type 우선)
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .select('*')
+    .neq('id', currentId)
+    .eq('published', true)
+    .overlaps('tags', tags)
+    .order('createdAt', { ascending: false })
+    .limit(limit + 10);
+
+  if (error) {
+    console.error('Error fetching related posts:', error);
+    return [];
+  }
+
+  let candidates = (data ?? []) as BlogPost[];
+
+  // 후보 부족하면 같은 type의 최신글로 보충
+  if (candidates.length < limit) {
+    const { posts: fallback } = await getPostsPaginated(type, limit + candidates.length + 1, 0);
+    const existingIds = new Set([currentId, ...candidates.map((c) => c.id)]);
+    fallback.forEach((p) => {
+      if (!existingIds.has(p.id) && candidates.length < limit + 5) {
+        candidates.push(p);
+        existingIds.add(p.id);
+      }
+    });
+  }
+
+  // 점수: 겹치는 태그 수 (많을수록 좋음). 동점이면 최신순.
+  const ranked = candidates
+    .map((p) => ({
+      post: p,
+      overlap: (p.tags ?? []).filter((t) => tags.includes(t)).length,
+    }))
+    .sort((a, b) => {
+      if (b.overlap !== a.overlap) return b.overlap - a.overlap;
+      return b.post.createdAt - a.post.createdAt;
+    })
+    .slice(0, limit);
+
+  return ranked.map((r) => r.post);
+};
+
 export const getPostById = async (id: string): Promise<BlogPost | null> => {
   const { data, error } = await supabase
     .from(TABLE_NAME)

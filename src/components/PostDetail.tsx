@@ -6,7 +6,7 @@ import type { Components } from 'react-markdown';
 import { BlogPost } from '../types';
 import { ChevronLeftIcon, MusicIcon, XMarkIcon, ArrowsPointingOutIcon, HeartIcon, ListBulletIcon, ShareIcon, TrashIcon } from './Icons';
 import AdUnit from './AdUnit';
-import { updatePostLikes, getPostById, togglePublished } from '../services/storage';
+import { updatePostLikes, getPostById, togglePublished, getRelatedPosts } from '../services/storage';
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h2 className="text-3xl font-bold text-slate-800 mt-8 mb-4">{children}</h2>,
@@ -61,7 +61,10 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
   
   // Share Feedback State
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
-  
+
+  // Related Posts
+  const [relatedPosts, setRelatedPosts] = useState<BlogPost[]>([]);
+
   // Loading & Error states
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +184,18 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
 
       return () => {
           cleanups.forEach((fn) => fn());
+      };
+  }, [post]);
+
+  // Fetch related posts when 'post' changes
+  useEffect(() => {
+      if (!post) return;
+      let cancelled = false;
+      getRelatedPosts(post.id, post.tags ?? [], post.type, 3).then((related) => {
+          if (!cancelled) setRelatedPosts(related);
+      });
+      return () => {
+          cancelled = true;
       };
   }, [post]);
 
@@ -480,6 +495,43 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                     </div>
                 )}
                 
+                {/* Related Posts */}
+                {relatedPosts.length > 0 && (
+                    <div className="mt-20 pt-10 border-t border-slate-100">
+                        <span className="text-xs font-bold tracking-widest text-indigo-500 uppercase mb-2 block">Related</span>
+                        <h3 className="text-2xl font-serif font-medium text-slate-900 mb-8">이런 글도 어때요?</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {relatedPosts.map((rp) => (
+                                <Link
+                                    key={rp.id}
+                                    to={`/p/${rp.id}`}
+                                    className="group block"
+                                >
+                                    {rp.coverImage && (
+                                        <div className="aspect-[16/10] rounded-lg overflow-hidden mb-3 bg-slate-100">
+                                            <img
+                                                src={rp.coverImage}
+                                                alt={rp.title}
+                                                loading="lazy"
+                                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                            />
+                                        </div>
+                                    )}
+                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                                        {new Date(rp.createdAt).toLocaleDateString()}
+                                    </div>
+                                    <h4 className="font-serif text-lg font-medium text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
+                                        {rp.title}
+                                    </h4>
+                                    <p className="text-sm text-slate-500 line-clamp-2 font-light leading-relaxed">
+                                        {rp.summary}
+                                    </p>
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Bottom AdSense Area */}
                 <div className="mt-24 pt-8 border-t border-slate-100">
                     <AdUnit type="banner" />
