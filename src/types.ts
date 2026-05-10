@@ -14,6 +14,7 @@ export interface BlogPost {
   contentImage?: string;     // @deprecated 레거시(단일 이미지) 호환용
   audioUrl?: string;
   likes?: number;            // 좋아요 수
+  view_count?: number;       // 조회수
   published?: boolean;       // false면 초안 (관리자만 볼 수 있음)
 }
 

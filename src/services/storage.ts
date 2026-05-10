@@ -296,27 +296,38 @@ export const updatePostLikes = async (id: string, likes: number): Promise<void> 
 
 // --- Visitor Stats Operations ---
 
-export const recordVisit = async (): Promise<void> => {
-  // Try using RPC function 'increment_visit' first (Atomic increment)
-  const { error } = await supabase.rpc('increment_visit');
-  
-  if (error) {
-    // If RPC fails (function not created), fallback to client-side logic
-    const today = new Date().toISOString().split('T')[0];
-    
-    // 1. Check if row exists
-    const { data: existing } = await supabase
-      .from('visitor_stats')
-      .select('count')
-      .eq('date', today)
-      .maybeSingle();
+/**
+ * User-Agent 기반 봇 탐지. 검색엔진/스크래퍼/링크 미리보기 봇은 카운트에서 제외.
+ */
+const isBotUserAgent = (): boolean => {
+  if (typeof navigator === 'undefined') return true;
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (!ua) return true;
+  return /bot|crawl|spider|slurp|google-?(?:bot|other)|bingbot|yandex|duckduckbot|baidu|sogou|exabot|facebookexternalhit|twitterbot|linkedinbot|embedly|whatsapp|telegram|discord|slack|preview|prerender|headlesschrome|phantomjs|lighthouse|chrome-lighthouse/i.test(ua);
+};
 
-    const currentCount = existing ? existing.count : 0;
-    
-    // 2. Upsert
-    await supabase
-      .from('visitor_stats')
-      .upsert({ date: today, count: currentCount + 1 });
+export const recordVisit = async (): Promise<void> => {
+  if (isBotUserAgent()) return;
+  const { error } = await supabase.rpc('increment_visit');
+  if (error) {
+    console.error('Error recording visit:', error.message);
+  }
+};
+
+/**
+ * 한 글당 한 세션에 1회만 카운트. 같은 사람이 새로고침해도 1회.
+ */
+export const recordPostView = async (postId: string): Promise<void> => {
+  if (!postId) return;
+  if (isBotUserAgent()) return;
+  // 세션별 dedup
+  const sessionKey = `viewed_${postId}`;
+  if (sessionStorage.getItem(sessionKey)) return;
+  sessionStorage.setItem(sessionKey, '1');
+
+  const { error } = await supabase.rpc('increment_post_view', { post_id_param: postId });
+  if (error) {
+    console.error('Error recording post view:', error.message);
   }
 };
 

@@ -6,7 +6,7 @@ import type { Components } from 'react-markdown';
 import { BlogPost } from '../types';
 import { ChevronLeftIcon, MusicIcon, XMarkIcon, ArrowsPointingOutIcon, HeartIcon, ListBulletIcon, ShareIcon, TrashIcon } from './Icons';
 import AdUnit from './AdUnit';
-import { updatePostLikes, getPostById, togglePublished, getRelatedPosts } from '../services/storage';
+import { updatePostLikes, getPostById, togglePublished, getRelatedPosts, recordPostView } from '../services/storage';
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h2 className="text-3xl font-bold text-slate-800 mt-8 mb-4">{children}</h2>,
@@ -199,6 +199,12 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
       };
   }, [post]);
 
+  // Record view (admin은 제외 — 본인 방문은 카운트하지 않음)
+  useEffect(() => {
+      if (!post || isAdmin) return;
+      recordPostView(post.id);
+  }, [post, isAdmin]);
+
   const handleLike = async () => {
       if (!post) return;
       const newIsLiked = !isLiked;
@@ -382,8 +388,14 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                         <h1 className="text-4xl md:text-6xl font-serif font-bold text-white mb-2 leading-tight drop-shadow-lg">
                             {post.title}
                         </h1>
-                         <div className="text-white/80 text-sm font-light">
-                            {new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                         <div className="text-white/80 text-sm font-light flex items-center gap-3">
+                            <span>{new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                            {post.view_count !== undefined && post.view_count > 0 && (
+                                <>
+                                    <span className="opacity-50">·</span>
+                                    <span>조회 {post.view_count.toLocaleString()}</span>
+                                </>
+                            )}
                          </div>
                     </div>
                 </div>
@@ -402,8 +414,14 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                     <h1 className="text-4xl md:text-6xl font-serif font-bold text-slate-900 mb-4 leading-tight">
                         {post.title}
                     </h1>
-                    <div className="text-slate-400 text-sm font-light">
-                        {new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                    <div className="text-slate-400 text-sm font-light flex items-center gap-3">
+                        <span>{new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                        {post.view_count !== undefined && post.view_count > 0 && (
+                            <>
+                                <span className="opacity-50">·</span>
+                                <span>조회 {post.view_count.toLocaleString()}</span>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
