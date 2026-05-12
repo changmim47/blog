@@ -205,6 +205,18 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
       recordPostView(post.id);
   }, [post, isAdmin]);
 
+  // 글을 못 찾는 경우 (삭제/비공개 draft 등) noindex 메타 추가 → Google이 soft 404로 인덱싱 안 함
+  useEffect(() => {
+      if (!error) return;
+      const meta = document.createElement('meta');
+      meta.setAttribute('name', 'robots');
+      meta.setAttribute('content', 'noindex');
+      document.head.appendChild(meta);
+      return () => {
+          meta.parentNode?.removeChild(meta);
+      };
+  }, [error]);
+
   const handleLike = async () => {
       if (!post) return;
       const newIsLiked = !isLiked;

@@ -65,6 +65,19 @@ function App() {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
+  // Canonical URL — 매 경로 변경 시 정식 도메인 + 경로로 설정.
+  // GSC가 www 있는/없는, HTTP/HTTPS 변형을 동일 페이지로 인식하게 함.
+  useEffect(() => {
+    const CANONICAL_BASE = 'https://daily-memorylog.com';
+    let link = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement('link');
+      link.setAttribute('rel', 'canonical');
+      document.head.appendChild(link);
+    }
+    link.setAttribute('href', `${CANONICAL_BASE}${location.pathname}`);
+  }, [location.pathname]);
+
   // Keyboard shortcut to open login modal — Cmd/Ctrl + Shift + L
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
