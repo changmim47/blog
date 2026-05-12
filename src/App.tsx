@@ -78,6 +78,20 @@ function App() {
     link.setAttribute('href', `${CANONICAL_BASE}${location.pathname}`);
   }, [location.pathname]);
 
+  // Google AdSense 스크립트 lazy 로드 — VITE_ADSENSE_CLIENT 설정 시에만.
+  // 한 번만 로드 (id로 중복 체크).
+  useEffect(() => {
+    const adsenseClient = import.meta.env.VITE_ADSENSE_CLIENT;
+    if (!adsenseClient) return;
+    if (document.getElementById('adsbygoogle-loader')) return;
+    const script = document.createElement('script');
+    script.id = 'adsbygoogle-loader';
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`;
+    document.head.appendChild(script);
+  }, []);
+
   // Keyboard shortcut to open login modal — Cmd/Ctrl + Shift + L
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

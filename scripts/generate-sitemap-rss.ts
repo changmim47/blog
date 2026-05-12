@@ -130,6 +130,17 @@ async function main() {
 
   console.log('  ✓ dist/sitemap.xml');
   console.log('  ✓ dist/rss.xml');
+
+  // ads.txt — Google AdSense 인증용. VITE_ADSENSE_CLIENT 설정 시만 생성.
+  const adsenseClient = process.env.VITE_ADSENSE_CLIENT;
+  if (adsenseClient) {
+    const pubId = adsenseClient.replace(/^ca-/, '');
+    const adsTxt = `google.com, ${pubId}, DIRECT, f08c47fec0942fa0\n`;
+    await writeFile(path.join(distDir, 'ads.txt'), adsTxt, 'utf-8');
+    console.log('  ✓ dist/ads.txt');
+  } else {
+    console.log('  ℹ️  VITE_ADSENSE_CLIENT not set — skipping ads.txt');
+  }
 }
 
 main().catch((e) => {

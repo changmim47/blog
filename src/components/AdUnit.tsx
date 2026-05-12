@@ -1,5 +1,25 @@
+import React, { useEffect, useRef } from 'react';
 
-import React from 'react';
+/**
+ * Google AdSense 광고 슬롯.
+ *
+ * 활성화 단계:
+ *   1) AdSense 가입 → publisher ID 발급 (예: ca-pub-1234567890123456)
+ *   2) 환경변수 VITE_ADSENSE_CLIENT 설정 → 사이트에 AdSense 스크립트 로드
+ *      - 이 단계만 해도 심사 신청 가능 (스크립트 통합 검증)
+ *   3) 심사 통과 후 AdSense 대시보드에서 광고 단위 생성 → slot ID 발급
+ *   4) 환경변수 VITE_ADSENSE_SLOT_BANNER / _INFEED / _RECTANGLE 설정
+ *      - 이때부터 실제 광고가 슬롯에 채워짐
+ *
+ * publisher ID나 slot ID 없으면 깨끗하게 nothing 렌더 (UX 보호).
+ */
+
+const AD_CLIENT = import.meta.env.VITE_ADSENSE_CLIENT;
+const AD_SLOTS: Record<string, string | undefined> = {
+  banner: import.meta.env.VITE_ADSENSE_SLOT_BANNER,
+  'in-feed': import.meta.env.VITE_ADSENSE_SLOT_INFEED,
+  rectangle: import.meta.env.VITE_ADSENSE_SLOT_RECTANGLE,
+};
 
 interface AdUnitProps {
   type?: 'banner' | 'in-feed' | 'rectangle';
@@ -7,54 +27,36 @@ interface AdUnitProps {
 }
 
 const AdUnit: React.FC<AdUnitProps> = ({ type = 'banner', className = '' }) => {
-  // -------------------------------------------------------------------------
-  // [광고 설정]
-  // 나중에 구글 애드센스 승인을 받은 후, 아래 값을 true로 변경하면 광고가 나타납니다.
-  // -------------------------------------------------------------------------
-  const SHOW_ADS = false; 
+  const slot = AD_SLOTS[type];
+  const pushed = useRef(false);
 
-  if (!SHOW_ADS) {
-    return null;
-  }
-
-  // Layout styling based on type
-  const getSizeClass = () => {
-    switch (type) {
-      case 'in-feed':
-        return 'h-32 md:h-40';
-      case 'rectangle':
-        return 'h-64 w-full md:w-80'; // Sidebar style
-      case 'banner':
-      default:
-        return 'h-24 md:h-28';
+  useEffect(() => {
+    if (!AD_CLIENT || !slot) return;
+    if (pushed.current) return;
+    try {
+      // adsbygoogle queue에 push → AdSense가 이 슬롯 채움
+      const w = window as unknown as { adsbygoogle?: Array<Record<string, unknown>> };
+      w.adsbygoogle = w.adsbygoogle || [];
+      w.adsbygoogle.push({});
+      pushed.current = true;
+    } catch (e) {
+      console.error('AdSense push failed:', e);
     }
-  };
+  }, [slot]);
+
+  // publisher ID 또는 slot ID 미설정 → 렌더 안 함 (활성화 전 깨끗한 UX)
+  if (!AD_CLIENT || !slot) return null;
 
   return (
     <div className={`w-full flex justify-center my-6 ${className}`}>
-      {/* AdSense Placeholder Container */}
-      <div className={`w-full bg-slate-100 border border-slate-200 rounded-lg flex flex-col items-center justify-center text-slate-400 overflow-hidden relative ${getSizeClass()}`}>
-        
-        {/* Visual Decoration for Placeholder */}
-        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        
-        <span className="text-xs font-semibold tracking-widest uppercase mb-1 z-10">Advertisement</span>
-        <span className="text-[10px] text-slate-300 z-10">(Google AdSense Area)</span>
-        
-        {/* 
-            TODO: 실제 적용 시 아래 주석을 해제하고 위쪽의 UI 코드를 지우거나 조건부 렌더링하세요.
-            
-            <ins className="adsbygoogle"
-                 style={{ display: 'block' }}
-                 data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
-                 data-ad-slot="YOUR_AD_SLOT_ID"
-                 data-ad-format="auto"
-                 data-full-width-responsive="true"></ins>
-            <script>
-                 (adsbygoogle = window.adsbygoogle || []).push({});
-            </script>
-        */}
-      </div>
+      <ins
+        className="adsbygoogle"
+        style={{ display: 'block', width: '100%' }}
+        data-ad-client={AD_CLIENT}
+        data-ad-slot={slot}
+        data-ad-format={type === 'rectangle' ? 'rectangle' : 'auto'}
+        data-full-width-responsive="true"
+      />
     </div>
   );
 };
