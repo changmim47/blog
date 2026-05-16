@@ -7,6 +7,8 @@ import { BlogPost } from '../types';
 import { ChevronLeftIcon, MusicIcon, XMarkIcon, ArrowsPointingOutIcon, HeartIcon, ListBulletIcon, ShareIcon, TrashIcon } from './Icons';
 import AdUnit from './AdUnit';
 import { updatePostLikes, getPostById, togglePublished, getRelatedPosts, recordPostView } from '../services/storage';
+import { AUTHOR, SITE } from '../constants/author';
+import AuthorBio from './AuthorBio';
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h2 className="text-3xl font-bold text-slate-800 mt-8 mb-4">{children}</h2>,
@@ -148,11 +150,14 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
         dateModified: publishedIso,
         author: {
           '@type': 'Person',
-          name: 'My Space',
+          name: AUTHOR.name,
+          url: AUTHOR.url,
+          description: AUTHOR.bio,
         },
         publisher: {
           '@type': 'Organization',
-          name: 'My Space',
+          name: SITE.name,
+          url: SITE.url,
           logo: {
             '@type': 'ImageObject',
             url: `${window.location.origin}/favicon.svg`,
@@ -525,6 +530,9 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                     </div>
                 )}
                 
+                {/* Author Bio */}
+                <AuthorBio />
+
                 {/* Related Posts */}
                 {relatedPosts.length > 0 && (
                     <div className="mt-20 pt-10 border-t border-slate-100">
