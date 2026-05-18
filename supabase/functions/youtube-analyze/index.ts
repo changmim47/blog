@@ -87,6 +87,8 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const keyword = typeof body.keyword === 'string' ? body.keyword.trim() : '';
     const maxResults = Math.min(Math.max(Number(body.maxResults ?? 25), 5), 50);
+    // ISO 8601 형식 (예: "2025-05-18T00:00:00Z"). 없으면 전체 기간.
+    const publishedAfter = typeof body.publishedAfter === 'string' ? body.publishedAfter : null;
 
     if (!keyword) {
       return json({ error: 'keyword required (non-empty string)' }, 400);
@@ -101,6 +103,9 @@ serve(async (req: Request) => {
     searchUrl.searchParams.set('maxResults', String(maxResults));
     searchUrl.searchParams.set('regionCode', 'KR');
     searchUrl.searchParams.set('relevanceLanguage', 'ko');
+    if (publishedAfter) {
+      searchUrl.searchParams.set('publishedAfter', publishedAfter);
+    }
     searchUrl.searchParams.set('key', YOUTUBE_API_KEY);
 
     const searchRes = await fetch(searchUrl.toString());
@@ -113,7 +118,7 @@ serve(async (req: Request) => {
       .filter((id: string | undefined): id is string => !!id);
 
     if (videoIds.length === 0) {
-      return json({ query: keyword, videos: [], keywords: [], videoCount: 0 });
+      return json({ query: keyword, videos: [], keywords: [], videoCount: 0, publishedAfter });
     }
 
     // 2. videos.list — 상세 stats + tags
@@ -182,7 +187,7 @@ serve(async (req: Request) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 60);
 
-    return json({ query: keyword, videos, keywords, videoCount: videos.length });
+    return json({ query: keyword, videos, keywords, videoCount: videos.length, publishedAfter });
   } catch (e) {
     console.error('youtube-analyze error:', e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

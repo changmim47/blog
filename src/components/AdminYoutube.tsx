@@ -27,10 +27,36 @@ interface AnalysisResult {
   videos: VideoData[];
   keywords: KeywordData[];
   videoCount: number;
+  publishedAfter?: string | null;
 }
+
+type Period = 'all' | '1y' | '6m' | '3m' | '1m' | '1w';
+
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: '1w', label: '최근 1주' },
+  { value: '1m', label: '최근 1개월' },
+  { value: '3m', label: '최근 3개월' },
+  { value: '6m', label: '최근 6개월' },
+  { value: '1y', label: '최근 1년' },
+  { value: 'all', label: '전체 기간' },
+];
+
+const periodToPublishedAfter = (p: Period): string | undefined => {
+  if (p === 'all') return undefined;
+  const d = new Date();
+  switch (p) {
+    case '1w': d.setDate(d.getDate() - 7); break;
+    case '1m': d.setMonth(d.getMonth() - 1); break;
+    case '3m': d.setMonth(d.getMonth() - 3); break;
+    case '6m': d.setMonth(d.getMonth() - 6); break;
+    case '1y': d.setFullYear(d.getFullYear() - 1); break;
+  }
+  return d.toISOString();
+};
 
 const AdminYoutube: React.FC = () => {
   const [query, setQuery] = useState('');
+  const [period, setPeriod] = useState<Period>('3m');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,8 +75,9 @@ const AdminYoutube: React.FC = () => {
     setQueueMessage(null);
 
     try {
+      const publishedAfter = periodToPublishedAfter(period);
       const { data, error: fnError } = await supabase.functions.invoke('youtube-analyze', {
-        body: { keyword: q },
+        body: { keyword: q, publishedAfter },
       });
       if (fnError) throw new Error(fnError.message);
       const payload = data as AnalysisResult & { error?: string };
@@ -153,7 +180,17 @@ const AdminYoutube: React.FC = () => {
 
       {/* 검색 폼 */}
       <div className="mb-8 max-w-2xl mx-auto">
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-2">
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value as Period)}
+            disabled={isAnalyzing}
+            className="px-3 py-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+          >
+            {PERIOD_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <input
             type="text"
             value={query}
@@ -173,6 +210,9 @@ const AdminYoutube: React.FC = () => {
             {isAnalyzing ? '분석 중...' : '분석'}
           </button>
         </div>
+        <p className="text-[11px] text-slate-400 ml-1">
+          기본 "최근 3개월" — 트렌드 신선도 vs 데이터 양 균형
+        </p>
       </div>
 
       {error && (
@@ -198,6 +238,11 @@ const AdminYoutube: React.FC = () => {
                   <span className="text-xs text-emerald-600 ml-2">✓ 히스토리 저장됨</span>
                 )}
               </p>
+              {result.publishedAfter && (
+                <p className="text-xs text-slate-400 mt-1">
+                  📅 {new Date(result.publishedAfter).toLocaleDateString()} 이후 발행된 영상만
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               <button
