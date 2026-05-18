@@ -13,6 +13,7 @@ import LoginModal from './components/LoginModal';
 import SectionPage from './components/SectionPage';
 import Drafts from './components/Drafts';
 import AdminRuns from './components/AdminRuns';
+import AdminYoutube from './components/AdminYoutube';
 import { PenIcon, LockOpenIcon, MagnifyingGlassIcon, XMarkIcon } from './components/Icons';
 import * as storage from './services/storage';
 import { supabase, checkConnection } from './services/supabaseClient';
@@ -359,6 +360,12 @@ function App() {
                                     Runs
                                 </Link>
                                 <Link
+                                    to="/admin/youtube"
+                                    className={`text-sm font-medium transition-all tracking-wide ${currentPath.includes('/admin/youtube') ? 'text-red-600 font-semibold' : 'text-slate-500 hover:text-red-600'}`}
+                                >
+                                    YouTube
+                                </Link>
+                                <Link
                                     to={getWriteLink()}
                                     className="flex items-center space-x-2 bg-black text-white px-5 py-2.5 rounded-full hover:bg-gray-800 transition-all transform hover:scale-105 shadow-lg shadow-gray-200"
                                 >
@@ -508,6 +515,10 @@ function App() {
 
                 <Route path="/admin/runs" element={
                     isAdmin ? <AdminRuns /> : <div className="text-center py-20">Access Denied</div>
+                } />
+
+                <Route path="/admin/youtube" element={
+                    isAdmin ? <AdminYoutube /> : <div className="text-center py-20">Access Denied</div>
                 } />
 
                 <Route path="/login" element={<LoginRoute isAdmin={isAdmin} onOpenLogin={() => setIsLoginModalOpen(true)} />} />

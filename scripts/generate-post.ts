@@ -255,6 +255,39 @@ async function recordFailure(
 
 // =========================== Agent Calls ===========================
 
+/**
+ * 관리자가 /admin/youtube에서 등록한 키워드를 그대로 사용하되,
+ * Marketing 에이전트로 나머지 브리핑(검색 의도, 타겟, 핵심 포인트 등)을 작성.
+ */
+async function runMarketingWithFixedKeyword(
+  fixedKeyword: string,
+  hint?: string | null
+): Promise<MarketingOutput> {
+  const userPrompt = `${buildCurrentContext()}[관리자 지정 키워드 — 변경 없이 그대로 사용]
+키워드: ${fixedKeyword}
+${hint ? `참고 컨텍스트(분석 시 쓴 원본 쿼리): ${hint}` : ''}
+
+후보 풀에서 선정하는 단계는 건너뛰세요. 위 키워드를 selected_keyword에 정확히 그대로 넣되,
+나머지 필드(search_intent, target_audience, angle, key_points, long_tail_variations,
+cover_image_query, reasoning)를 블로그 컨셉에 맞게 작성하세요.
+
+selected_keyword는 위 키워드 그대로 (변형 금지). 표기 규칙(영어 첫 글자 대문자)만 적용.`;
+
+  log(`🎯 Marketing agent — adapting brief for manual keyword "${fixedKeyword}"...`);
+  const result = await callAgent<MarketingOutput>({
+    agentName: 'marketing',
+    userPrompt,
+    toolName: 'submit_marketing_brief',
+    toolDescription: '관리자 지정 키워드에 대한 브리핑 작성',
+    inputSchema: MARKETING_SCHEMA,
+    webSearchMaxUses: 2,
+    log,
+  });
+  // 안전장치: Marketing이 키워드를 약간 변형해도 무시하고 강제로 원본 사용
+  result.selected_keyword = fixedKeyword;
+  return result;
+}
+
 async function runMarketing(
   candidates: Candidate[],
   exclusion: ExclusionList
@@ -391,24 +424,54 @@ async function main() {
   await reporter.start();
   await reporter.update({ marketing: { status: 'in-progress' } });
 
-  // 1. Autocomplete pool + dedup
-  const pool = await gatherSuggestions();
-  const allCandidates = buildCandidates(pool);
-  log(`Built ${allCandidates.length} unique candidates`);
-
-  log(`Fetching recent topics (last ${DEDUP_LOOKBACK_DAYS} days) to avoid duplicates...`);
-  const exclusion = await fetchRecentTopics(DEDUP_LOOKBACK_DAYS);
-  log(`  ✓ ${exclusion.titles.length} recent posts, ${exclusion.keywords.length} recent keywords`);
-
-  const candidates = filterDuplicateCandidates(allCandidates, exclusion);
-  log(`Filtered out ${allCandidates.length - candidates.length}. ${candidates.length} candidates remain.`);
-
-  if (candidates.length === 0) {
-    throw new Error('No non-duplicate candidates available. Try expanding seed pool.');
+  // 0. 관리자 지정 키워드 큐 우선 확인
+  let manualQueueId: number | null = null;
+  let manualKeyword: string | null = null;
+  let manualHint: string | null = null;
+  try {
+    const { data: claimed, error: claimErr } = await supabase.rpc('claim_next_manual_keyword');
+    if (claimErr) console.warn('claim_next_manual_keyword failed (non-fatal):', claimErr.message);
+    if (claimed && Array.isArray(claimed) && claimed.length > 0) {
+      manualQueueId = claimed[0].id;
+      manualKeyword = claimed[0].keyword;
+      manualHint = claimed[0].search_intent_hint;
+      log(`📌 Manual queue: using "${manualKeyword}" (queue id=${manualQueueId})`);
+    }
+  } catch (e) {
+    console.warn('Queue check failed (non-fatal), falling back to autocomplete:', e);
   }
 
-  // 2. Marketing agent
-  const marketing = await runMarketing(candidates, exclusion);
+  let marketing: MarketingOutput;
+  const pool: SeedSuggestions[] = [];
+  const exclusion: ExclusionList = { titles: [], keywords: [] };
+
+  if (manualKeyword) {
+    // 수동 키워드 모드 — autocomplete/dedup 건너뛰고 Marketing이 브리핑만 작성
+    marketing = await runMarketingWithFixedKeyword(manualKeyword, manualHint);
+  } else {
+    // 1. Autocomplete pool + dedup (기존 흐름)
+    const fetchedPool = await gatherSuggestions();
+    pool.push(...fetchedPool);
+    const allCandidates = buildCandidates(pool);
+    log(`Built ${allCandidates.length} unique candidates`);
+
+    log(`Fetching recent topics (last ${DEDUP_LOOKBACK_DAYS} days) to avoid duplicates...`);
+    const fetchedExclusion = await fetchRecentTopics(DEDUP_LOOKBACK_DAYS);
+    exclusion.titles = fetchedExclusion.titles;
+    exclusion.keywords = fetchedExclusion.keywords;
+    log(`  ✓ ${exclusion.titles.length} recent posts, ${exclusion.keywords.length} recent keywords`);
+
+    const candidates = filterDuplicateCandidates(allCandidates, exclusion);
+    log(`Filtered out ${allCandidates.length - candidates.length}. ${candidates.length} candidates remain.`);
+
+    if (candidates.length === 0) {
+      throw new Error('No non-duplicate candidates available. Try expanding seed pool.');
+    }
+
+    // 2. Marketing agent
+    marketing = await runMarketing(candidates, exclusion);
+  }
+
   await reporter.update({
     marketing: { status: 'done', keyword: marketing.selected_keyword, intent: marketing.search_intent },
     operations: { status: 'in-progress', revisionAttempt: 1 },
@@ -506,8 +569,14 @@ async function main() {
         revisionCount,
         finalQaIssues: qa.issues,
         pool,
+        manualQueueId,
       }
     );
+    // 수동 키워드였으면 큐를 failed로 표시 (다시 안 잡힘)
+    if (manualQueueId !== null) {
+      try { await supabase.rpc('mark_manual_keyword_failed', { queue_id: manualQueueId }); }
+      catch (e) { console.warn('mark_manual_keyword_failed failed:', e); }
+    }
     await reporter.update({
       final: {
         outcome: 'rejected',
@@ -549,15 +618,25 @@ async function main() {
     keyword: marketing.selected_keyword,
     topic: draft.title,
     post_id: postId,
-    error_message: revisionCount > 0 ? `Approved after ${revisionCount} revision(s)` : null,
+    error_message: [
+      manualKeyword ? '[manual queue]' : null,
+      revisionCount > 0 ? `Approved after ${revisionCount} revision(s)` : null,
+    ].filter(Boolean).join(' ') || null,
     trends_raw: {
       agents: agentTrace,
       revisionCount,
       pool,
+      manualQueueId,
     },
   });
   if (runError) throw new Error(`Insert run failed: ${runError.message}`);
   log('✓ Recorded run');
+
+  // 수동 키워드 사용 성공 처리
+  if (manualQueueId !== null) {
+    try { await supabase.rpc('mark_manual_keyword_used', { queue_id: manualQueueId, used_post_id: postId }); }
+    catch (e) { console.warn('mark_manual_keyword_used failed:', e); }
+  }
 
   log('');
   log(`✅ Done. Keyword: "${marketing.selected_keyword}". Check /drafts and /admin/runs.`);
