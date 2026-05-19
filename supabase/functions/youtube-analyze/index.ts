@@ -1,10 +1,11 @@
-// YouTube 키워드 분석 Edge Function (Deno)
-// - 입력: { keyword: string, maxResults?: number }
-// - 출력: { query, videos[], keywords[], videoCount }
-// - 인증: 로그인된 사용자만 호출 가능 (anon 거부)
+// YouTube 분석 Edge Function (Deno)
 //
-// 배포: supabase functions deploy youtube-analyze
-// 시크릿: supabase secrets set YOUTUBE_API_KEY=... (대시보드에서도 가능)
+// 두 가지 모드:
+//   1) mode='search' (기본) — 키워드로 인기 영상 검색 (publishedAfter 기간 필터 지원)
+//   2) mode='trending'      — 인기 급상승 차트 (videoCategoryId로 카테고리 필터)
+//
+// 인증: 로그인된 사용자만 호출 가능 (anon 거부)
+// 시크릿: YOUTUBE_API_KEY
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -40,6 +41,20 @@ const STOPWORDS_EN = new Set([
   'just','also','more','most','some','any','all','no','not','out','up','down',
 ]);
 
+interface RawVideoItem {
+  id: string | { videoId?: string };
+  snippet: {
+    title: string;
+    description?: string;
+    channelTitle: string;
+    publishedAt: string;
+    tags?: string[];
+    thumbnails: { medium?: { url: string }; default?: { url: string } };
+  };
+  statistics?: { viewCount?: string; likeCount?: string; commentCount?: string };
+  contentDetails?: { duration: string };
+}
+
 interface AnalyzedVideo {
   id: string;
   title: string;
@@ -71,128 +86,160 @@ serve(async (req: Request) => {
       return json({ error: 'YOUTUBE_API_KEY not configured in Edge Function secrets' }, 500);
     }
 
-    // 인증 확인 — 로그인된 admin만
+    // 인증
     const authHeader = req.headers.get('Authorization') ?? '';
-    if (!authHeader) {
-      return json({ error: 'Authentication required' }, 401);
-    }
+    if (!authHeader) return json({ error: 'Authentication required' }, 401);
     const supa = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user } } = await supa.auth.getUser();
-    if (!user) {
-      return json({ error: 'Invalid or expired session' }, 401);
-    }
+    if (!user) return json({ error: 'Invalid or expired session' }, 401);
 
     const body = await req.json().catch(() => ({}));
-    const keyword = typeof body.keyword === 'string' ? body.keyword.trim() : '';
+    const mode: 'search' | 'trending' = body.mode === 'trending' ? 'trending' : 'search';
     const maxResults = Math.min(Math.max(Number(body.maxResults ?? 25), 5), 50);
-    // ISO 8601 형식 (예: "2025-05-18T00:00:00Z"). 없으면 전체 기간.
-    const publishedAfter = typeof body.publishedAfter === 'string' ? body.publishedAfter : null;
 
-    if (!keyword) {
-      return json({ error: 'keyword required (non-empty string)' }, 400);
+    let videos: AnalyzedVideo[];
+    let query = '';
+    let publishedAfter: string | null = null;
+    let videoCategoryId: string | null = null;
+
+    if (mode === 'trending') {
+      videoCategoryId = typeof body.videoCategoryId === 'string' && body.videoCategoryId
+        ? body.videoCategoryId
+        : null;
+      videos = await fetchTrendingVideos(maxResults, videoCategoryId);
+      query = videoCategoryId ? `[Trending KR - category ${videoCategoryId}]` : '[Trending KR - all]';
+    } else {
+      query = typeof body.keyword === 'string' ? body.keyword.trim() : '';
+      if (!query) return json({ error: 'keyword required for search mode' }, 400);
+      publishedAfter = typeof body.publishedAfter === 'string' ? body.publishedAfter : null;
+      videos = await fetchSearchVideos(query, maxResults, publishedAfter);
     }
-
-    // 1. search.list — 키워드로 인기 영상 검색
-    const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-    searchUrl.searchParams.set('part', 'snippet');
-    searchUrl.searchParams.set('q', keyword);
-    searchUrl.searchParams.set('type', 'video');
-    searchUrl.searchParams.set('order', 'viewCount');
-    searchUrl.searchParams.set('maxResults', String(maxResults));
-    searchUrl.searchParams.set('regionCode', 'KR');
-    searchUrl.searchParams.set('relevanceLanguage', 'ko');
-    if (publishedAfter) {
-      searchUrl.searchParams.set('publishedAfter', publishedAfter);
-    }
-    searchUrl.searchParams.set('key', YOUTUBE_API_KEY);
-
-    const searchRes = await fetch(searchUrl.toString());
-    const searchData = await searchRes.json();
-    if (!searchRes.ok || searchData.error) {
-      return json({ error: `YouTube search failed: ${searchData.error?.message ?? searchRes.statusText}` }, 502);
-    }
-    const videoIds: string[] = (searchData.items ?? [])
-      .map((item: { id?: { videoId?: string } }) => item.id?.videoId)
-      .filter((id: string | undefined): id is string => !!id);
-
-    if (videoIds.length === 0) {
-      return json({ query: keyword, videos: [], keywords: [], videoCount: 0, publishedAfter });
-    }
-
-    // 2. videos.list — 상세 stats + tags
-    const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos');
-    detailsUrl.searchParams.set('part', 'snippet,statistics,contentDetails');
-    detailsUrl.searchParams.set('id', videoIds.join(','));
-    detailsUrl.searchParams.set('key', YOUTUBE_API_KEY);
-
-    const detailsRes = await fetch(detailsUrl.toString());
-    const detailsData = await detailsRes.json();
-    if (!detailsRes.ok || detailsData.error) {
-      return json({ error: `YouTube details failed: ${detailsData.error?.message ?? detailsRes.statusText}` }, 502);
-    }
-
-    const videos: AnalyzedVideo[] = (detailsData.items ?? []).map((item: {
-      id: string;
-      snippet: {
-        title: string; description?: string; channelTitle: string; publishedAt: string;
-        tags?: string[]; thumbnails: { medium?: { url: string }; default?: { url: string } };
-      };
-      statistics: { viewCount?: string; likeCount?: string; commentCount?: string };
-      contentDetails: { duration: string };
-    }) => ({
-      id: item.id,
-      title: item.snippet.title,
-      description: (item.snippet.description ?? '').slice(0, 300),
-      channelTitle: item.snippet.channelTitle,
-      publishedAt: item.snippet.publishedAt,
-      thumbnail: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default?.url ?? '',
-      tags: item.snippet.tags ?? [],
-      viewCount: parseInt(item.statistics.viewCount ?? '0', 10),
-      likeCount: parseInt(item.statistics.likeCount ?? '0', 10),
-      commentCount: parseInt(item.statistics.commentCount ?? '0', 10),
-      duration: item.contentDetails.duration,
-      url: `https://www.youtube.com/watch?v=${item.id}`,
-    }));
 
     videos.sort((a, b) => b.viewCount - a.viewCount);
+    const keywords = extractKeywords(videos);
 
-    // 3. 키워드 빈도 추출 (제목 + 태그)
-    const freq = new Map<string, { count: number; videoIds: string[] }>();
-    for (const v of videos) {
-      const text = `${v.title} ${v.tags.join(' ')}`;
-      const tokens = text
-        .toLowerCase()
-        .replace(/[^\w가-힣\s]/g, ' ')
-        .split(/\s+/)
-        .filter((t) => {
-          if (t.length < 2) return false;
-          if (STOPWORDS_KO.has(t) || STOPWORDS_EN.has(t)) return false;
-          if (/^\d+$/.test(t)) return false;
-          return true;
-        });
-      const unique = new Set(tokens);
-      for (const token of unique) {
-        const e = freq.get(token) ?? { count: 0, videoIds: [] };
-        e.count += 1;
-        e.videoIds.push(v.id);
-        freq.set(token, e);
-      }
-    }
-
-    const keywords: KeywordEntry[] = Array.from(freq.entries())
-      .map(([k, data]) => ({ keyword: k, count: data.count, videoIds: data.videoIds }))
-      .filter((k) => k.count >= 2)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 60);
-
-    return json({ query: keyword, videos, keywords, videoCount: videos.length, publishedAfter });
+    return json({
+      mode,
+      query,
+      videos,
+      keywords,
+      videoCount: videos.length,
+      publishedAfter,
+      videoCategoryId,
+    });
   } catch (e) {
     console.error('youtube-analyze error:', e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
+
+// =================== Fetchers ===================
+
+async function fetchTrendingVideos(maxResults: number, categoryId: string | null): Promise<AnalyzedVideo[]> {
+  const url = new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.searchParams.set('part', 'snippet,statistics,contentDetails');
+  url.searchParams.set('chart', 'mostPopular');
+  url.searchParams.set('regionCode', 'KR');
+  url.searchParams.set('maxResults', String(maxResults));
+  if (categoryId) url.searchParams.set('videoCategoryId', categoryId);
+  url.searchParams.set('key', YOUTUBE_API_KEY!);
+
+  const res = await fetch(url.toString());
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(`YouTube trending failed: ${data.error?.message ?? res.statusText}`);
+  }
+  return (data.items ?? []).map(mapVideoItem);
+}
+
+async function fetchSearchVideos(keyword: string, maxResults: number, publishedAfter: string | null): Promise<AnalyzedVideo[]> {
+  // 1. search.list
+  const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+  searchUrl.searchParams.set('part', 'snippet');
+  searchUrl.searchParams.set('q', keyword);
+  searchUrl.searchParams.set('type', 'video');
+  searchUrl.searchParams.set('order', 'viewCount');
+  searchUrl.searchParams.set('maxResults', String(maxResults));
+  searchUrl.searchParams.set('regionCode', 'KR');
+  searchUrl.searchParams.set('relevanceLanguage', 'ko');
+  if (publishedAfter) searchUrl.searchParams.set('publishedAfter', publishedAfter);
+  searchUrl.searchParams.set('key', YOUTUBE_API_KEY!);
+
+  const searchRes = await fetch(searchUrl.toString());
+  const searchData = await searchRes.json();
+  if (!searchRes.ok || searchData.error) {
+    throw new Error(`YouTube search failed: ${searchData.error?.message ?? searchRes.statusText}`);
+  }
+  const videoIds: string[] = (searchData.items ?? [])
+    .map((item: RawVideoItem) => (typeof item.id === 'object' ? item.id.videoId : null))
+    .filter((id: string | null | undefined): id is string => !!id);
+
+  if (videoIds.length === 0) return [];
+
+  // 2. videos.list for stats + tags
+  const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos');
+  detailsUrl.searchParams.set('part', 'snippet,statistics,contentDetails');
+  detailsUrl.searchParams.set('id', videoIds.join(','));
+  detailsUrl.searchParams.set('key', YOUTUBE_API_KEY!);
+
+  const detailsRes = await fetch(detailsUrl.toString());
+  const detailsData = await detailsRes.json();
+  if (!detailsRes.ok || detailsData.error) {
+    throw new Error(`YouTube details failed: ${detailsData.error?.message ?? detailsRes.statusText}`);
+  }
+  return (detailsData.items ?? []).map(mapVideoItem);
+}
+
+function mapVideoItem(item: RawVideoItem): AnalyzedVideo {
+  const id = typeof item.id === 'string' ? item.id : (item.id.videoId ?? '');
+  return {
+    id,
+    title: item.snippet.title,
+    description: (item.snippet.description ?? '').slice(0, 300),
+    channelTitle: item.snippet.channelTitle,
+    publishedAt: item.snippet.publishedAt,
+    thumbnail: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default?.url ?? '',
+    tags: item.snippet.tags ?? [],
+    viewCount: parseInt(item.statistics?.viewCount ?? '0', 10),
+    likeCount: parseInt(item.statistics?.likeCount ?? '0', 10),
+    commentCount: parseInt(item.statistics?.commentCount ?? '0', 10),
+    duration: item.contentDetails?.duration ?? '',
+    url: `https://www.youtube.com/watch?v=${id}`,
+  };
+}
+
+// =================== Keyword extraction ===================
+
+function extractKeywords(videos: AnalyzedVideo[]): KeywordEntry[] {
+  const freq = new Map<string, { count: number; videoIds: string[] }>();
+  for (const v of videos) {
+    const text = `${v.title} ${v.tags.join(' ')}`;
+    const tokens = text
+      .toLowerCase()
+      .replace(/[^\w가-힣\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => {
+        if (t.length < 2) return false;
+        if (STOPWORDS_KO.has(t) || STOPWORDS_EN.has(t)) return false;
+        if (/^\d+$/.test(t)) return false;
+        return true;
+      });
+    const unique = new Set(tokens);
+    for (const token of unique) {
+      const e = freq.get(token) ?? { count: 0, videoIds: [] };
+      e.count += 1;
+      e.videoIds.push(v.id);
+      freq.set(token, e);
+    }
+  }
+  return Array.from(freq.entries())
+    .map(([k, data]) => ({ keyword: k, count: data.count, videoIds: data.videoIds }))
+    .filter((k) => k.count >= 2)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 60);
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

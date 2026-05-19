@@ -23,14 +23,17 @@ interface KeywordData {
 }
 
 interface AnalysisResult {
+  mode: 'search' | 'trending';
   query: string;
   videos: VideoData[];
   keywords: KeywordData[];
   videoCount: number;
   publishedAfter?: string | null;
+  videoCategoryId?: string | null;
 }
 
 type Period = 'all' | '1y' | '6m' | '3m' | '1m' | '1w';
+type Mode = 'search' | 'trending';
 
 const PERIOD_OPTIONS: { value: Period; label: string }[] = [
   { value: '1w', label: '최근 1주' },
@@ -39,6 +42,22 @@ const PERIOD_OPTIONS: { value: Period; label: string }[] = [
   { value: '6m', label: '최근 6개월' },
   { value: '1y', label: '최근 1년' },
   { value: 'all', label: '전체 기간' },
+];
+
+// YouTube Data API video category IDs (KR에서 자주 보는 것 위주)
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'all', label: '전체' },
+  { value: '10', label: '음악' },
+  { value: '20', label: '게임' },
+  { value: '24', label: '엔터테인먼트' },
+  { value: '23', label: '코미디' },
+  { value: '25', label: '뉴스/정치' },
+  { value: '26', label: '하우투/스타일' },
+  { value: '27', label: '교육' },
+  { value: '28', label: '과학/기술' },
+  { value: '17', label: '스포츠' },
+  { value: '22', label: 'People & Blogs' },
+  { value: '1', label: '영화/애니메이션' },
 ];
 
 const periodToPublishedAfter = (p: Period): string | undefined => {
@@ -55,8 +74,10 @@ const periodToPublishedAfter = (p: Period): string | undefined => {
 };
 
 const AdminYoutube: React.FC = () => {
+  const [mode, setMode] = useState<Mode>('search');
   const [query, setQuery] = useState('');
   const [period, setPeriod] = useState<Period>('3m');
+  const [category, setCategory] = useState<string>('all');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +86,7 @@ const AdminYoutube: React.FC = () => {
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
-    const q = query.trim();
-    if (!q) return;
+    if (mode === 'search' && !query.trim()) return;
     setIsAnalyzing(true);
     setError(null);
     setResult(null);
@@ -75,10 +95,11 @@ const AdminYoutube: React.FC = () => {
     setQueueMessage(null);
 
     try {
-      const publishedAfter = periodToPublishedAfter(period);
-      const { data, error: fnError } = await supabase.functions.invoke('youtube-analyze', {
-        body: { keyword: q, publishedAfter },
-      });
+      const body =
+        mode === 'search'
+          ? { mode: 'search', keyword: query.trim(), publishedAfter: periodToPublishedAfter(period) }
+          : { mode: 'trending', videoCategoryId: category === 'all' ? undefined : category };
+      const { data, error: fnError } = await supabase.functions.invoke('youtube-analyze', { body });
       if (fnError) throw new Error(fnError.message);
       const payload = data as AnalysisResult & { error?: string };
       if (payload.error) throw new Error(payload.error);
@@ -178,41 +199,92 @@ const AdminYoutube: React.FC = () => {
         </p>
       </header>
 
-      {/* 검색 폼 */}
+      {/* 탭 */}
+      <div className="mb-6 max-w-2xl mx-auto flex border-b border-slate-200">
+        <button
+          onClick={() => { setMode('search'); setResult(null); setError(null); }}
+          className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
+            mode === 'search'
+              ? 'border-black text-black'
+              : 'border-transparent text-slate-400 hover:text-slate-700'
+          }`}
+        >
+          🔍 키워드 분석
+        </button>
+        <button
+          onClick={() => { setMode('trending'); setResult(null); setError(null); }}
+          className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
+            mode === 'trending'
+              ? 'border-red-500 text-red-600'
+              : 'border-transparent text-slate-400 hover:text-slate-700'
+          }`}
+        >
+          🔥 인기 급상승
+        </button>
+      </div>
+
+      {/* 입력 폼 - 모드별 */}
       <div className="mb-8 max-w-2xl mx-auto">
-        <div className="flex gap-2 mb-2">
-          <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value as Period)}
-            disabled={isAnalyzing}
-            className="px-3 py-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-          >
-            {PERIOD_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isAnalyzing) handleAnalyze();
-            }}
-            placeholder="예: 2026 주식 종목 추천, AI 자동매매, ChatGPT 사용법..."
-            className="flex-1 px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-            disabled={isAnalyzing}
-          />
-          <button
-            onClick={handleAnalyze}
-            disabled={isAnalyzing || !query.trim()}
-            className="bg-black text-white px-6 py-3 rounded-lg text-sm font-bold hover:bg-gray-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {isAnalyzing ? '분석 중...' : '분석'}
-          </button>
-        </div>
-        <p className="text-[11px] text-slate-400 ml-1">
-          기본 "최근 3개월" — 트렌드 신선도 vs 데이터 양 균형
-        </p>
+        {mode === 'search' ? (
+          <>
+            <div className="flex gap-2 mb-2">
+              <select
+                value={period}
+                onChange={(e) => setPeriod(e.target.value as Period)}
+                disabled={isAnalyzing}
+                className="px-3 py-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+              >
+                {PERIOD_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !isAnalyzing) handleAnalyze(); }}
+                placeholder="예: 2026 주식 종목 추천, AI 자동매매, ChatGPT 사용법..."
+                className="flex-1 px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                disabled={isAnalyzing}
+              />
+              <button
+                onClick={handleAnalyze}
+                disabled={isAnalyzing || !query.trim()}
+                className="bg-black text-white px-6 py-3 rounded-lg text-sm font-bold hover:bg-gray-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isAnalyzing ? '분석 중...' : '분석'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 ml-1">
+              기본 "최근 3개월" — 트렌드 신선도 vs 데이터 양 균형
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="flex gap-2 mb-2">
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                disabled={isAnalyzing}
+                className="flex-1 px-4 py-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+              >
+                {CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAnalyze}
+                disabled={isAnalyzing}
+                className="bg-red-600 text-white px-6 py-3 rounded-lg text-sm font-bold hover:bg-red-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isAnalyzing ? '분석 중...' : '인기 차트 가져오기'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 ml-1">
+              YouTube 공식 인기 급상승 차트 (KR 기준, 실시간). 카테고리 필터 가능.
+            </p>
+          </>
+        )}
       </div>
 
       {error && (
@@ -232,8 +304,12 @@ const AdminYoutube: React.FC = () => {
           <div className="mb-6 flex flex-wrap justify-between items-center gap-4">
             <div>
               <p className="text-sm text-slate-600">
-                <span className="font-semibold text-slate-900">"{result.query}"</span> · 영상{' '}
-                {result.videoCount}개 · 키워드 {result.keywords.length}개 추출
+                {result.mode === 'trending' ? (
+                  <span className="font-semibold text-slate-900">🔥 {result.query}</span>
+                ) : (
+                  <span className="font-semibold text-slate-900">"{result.query}"</span>
+                )}
+                <span> · 영상 {result.videoCount}개 · 키워드 {result.keywords.length}개 추출</span>
                 {savedSearchId && (
                   <span className="text-xs text-emerald-600 ml-2">✓ 히스토리 저장됨</span>
                 )}
@@ -241,6 +317,11 @@ const AdminYoutube: React.FC = () => {
               {result.publishedAfter && (
                 <p className="text-xs text-slate-400 mt-1">
                   📅 {new Date(result.publishedAfter).toLocaleDateString()} 이후 발행된 영상만
+                </p>
+              )}
+              {result.mode === 'trending' && (
+                <p className="text-xs text-slate-400 mt-1">
+                  📊 YouTube 공식 인기 급상승 차트 (KR) — 실시간 스냅샷
                 </p>
               )}
             </div>
