@@ -374,6 +374,22 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     webSearchMaxUses: 5, // 본문 작성 — 최신 가격/모델/정책 확인 위해 충분히
     log,
   });
+
+  // Claude가 web_search 결과 기반 작성 시 <cite index="...">...</cite> 인용 태그를
+  // 자동 삽입함. 마크다운 본문에는 불필요하니 제거 (태그만, 안의 텍스트는 보존).
+  const stripCitations = (s: string) => s.replace(/<\/?cite[^>]*>/g, '');
+  result.title = stripCitations(result.title);
+  result.summary = stripCitations(result.summary);
+  result.content_markdown = stripCitations(result.content_markdown);
+  if (result.image_alt_suggestions) {
+    result.image_alt_suggestions = result.image_alt_suggestions.map((i) => ({
+      position: stripCitations(i.position),
+      alt_text: stripCitations(i.alt_text),
+    }));
+  }
+  if (result.technical_notes) {
+    result.technical_notes = stripCitations(result.technical_notes);
+  }
   log(`  ✓ Operations title: ${result.title}`);
   log(`  ✓ Body: ${result.content_markdown.length} chars, ${result.tags.length} tags`);
   return result;
