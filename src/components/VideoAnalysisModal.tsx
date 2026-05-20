@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../services/supabaseClient';
 import { XMarkIcon } from './Icons';
 
@@ -106,7 +107,8 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
     }
   };
 
-  return (
+  // 모달을 body 직속에 렌더 — 부모의 transform/filter 등이 fixed 위치를 망가뜨리지 않도록
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -240,7 +242,8 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

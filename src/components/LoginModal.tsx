@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LockClosedIcon, XMarkIcon } from './Icons';
 
 interface LoginModalProps {
@@ -67,7 +68,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSubmit }) =>
     }
   };
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -156,7 +157,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSubmit }) =>
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
