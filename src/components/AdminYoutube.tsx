@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
+import VideoAnalysisModal from './VideoAnalysisModal';
 
 interface VideoData {
   id: string;
@@ -84,6 +85,7 @@ const AdminYoutube: React.FC = () => {
   const [savedSearchId, setSavedSearchId] = useState<number | null>(null);
   const [queuedKeywords, setQueuedKeywords] = useState<Set<string>>(new Set());
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [analyzingVideo, setAnalyzingVideo] = useState<VideoData | null>(null);
 
   const handleAnalyze = async () => {
     if (mode === 'search' && !query.trim()) return;
@@ -407,6 +409,7 @@ const AdminYoutube: React.FC = () => {
                       <th className="px-4 py-3 text-right whitespace-nowrap">조회수</th>
                       <th className="px-4 py-3 text-right whitespace-nowrap">좋아요</th>
                       <th className="px-4 py-3 whitespace-nowrap">게시일</th>
+                      <th className="px-4 py-3"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -442,6 +445,15 @@ const AdminYoutube: React.FC = () => {
                         <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                           {new Date(v.publishedAt).toLocaleDateString()}
                         </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <button
+                            onClick={() => setAnalyzingVideo(v)}
+                            className="text-xs font-medium px-3 py-1.5 border border-slate-300 rounded-md hover:border-red-500 hover:text-red-600 transition-colors"
+                            title="이 영상을 Gemini로 분석"
+                          >
+                            🔍 분석
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -450,6 +462,15 @@ const AdminYoutube: React.FC = () => {
             </div>
           </section>
         </>
+      )}
+
+      {analyzingVideo && (
+        <VideoAnalysisModal
+          videoId={analyzingVideo.id}
+          videoTitle={analyzingVideo.title}
+          videoThumbnail={analyzingVideo.thumbnail}
+          onClose={() => setAnalyzingVideo(null)}
+        />
       )}
     </div>
   );
