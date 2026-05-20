@@ -33,6 +33,7 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [queuedTitles, setQueuedTitles] = useState<Set<string>>(new Set());
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,19 +41,29 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
     setError(null);
     setResult(null);
     setQueuedTitles(new Set());
+    setElapsedSec(0);
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      if (cancelled) return;
+      setElapsedSec(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
 
     (async () => {
       try {
+        console.log('[video-analyze] invoking for videoId:', videoId);
         const { data, error: fnError } = await supabase.functions.invoke('video-analyze', {
           body: { videoId },
         });
         if (cancelled) return;
+        console.log('[video-analyze] response:', { fnError, data });
         if (fnError) throw new Error(fnError.message);
         const payload = data as AnalysisResult & { error?: string };
         if (payload.error) throw new Error(payload.error);
         setResult(payload);
       } catch (e) {
         if (cancelled) return;
+        console.error('[video-analyze] failed:', e);
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -61,6 +72,7 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [videoId]);
 
@@ -129,9 +141,24 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
         </div>
 
         {isLoading && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="w-8 h-8 border-2 border-slate-200 border-t-red-600 rounded-full animate-spin mb-3"></div>
-            <p className="text-sm text-slate-500">Gemini가 영상을 분석 중... (10~30초)</p>
+          <div className="flex flex-col items-center justify-center py-20 px-6">
+            <div className="relative mb-6">
+              <div className="w-16 h-16 border-4 border-slate-100 border-t-red-500 border-r-red-500 rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-2xl">🎬</span>
+              </div>
+            </div>
+            <p className="text-base font-medium text-slate-900 mb-1">Gemini가 영상을 분석 중</p>
+            <p className="text-xs text-slate-500 mb-3">시각 · 음성 · 자막을 모두 읽고 있어요</p>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span className="inline-block w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+              <span className="font-mono tabular-nums">{elapsedSec}초 경과</span>
+              <span className="text-slate-300">·</span>
+              <span>보통 10~30초</span>
+            </div>
+            {elapsedSec > 45 && (
+              <p className="text-[11px] text-amber-600 mt-4">긴 영상이면 60초+ 걸릴 수 있어요. 잠시만 더...</p>
+            )}
           </div>
         )}
 
