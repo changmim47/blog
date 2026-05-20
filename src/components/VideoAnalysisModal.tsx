@@ -99,11 +99,11 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="video-analysis-title"
-      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-start md:items-center justify-center p-4 animate-fade-in overflow-y-auto"
+      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full my-8 p-6 md:p-8 relative"
+        className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 relative"
         onClick={(e) => e.stopPropagation()}
       >
         <button
