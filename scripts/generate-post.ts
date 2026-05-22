@@ -375,8 +375,21 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     log,
   });
 
-  // Claude가 web_search 결과 기반 작성 시 <cite index="...">...</cite> 인용 태그를
-  // 자동 삽입함. 마크다운 본문에는 불필요하니 제거 (태그만, 안의 텍스트는 보존).
+  // 스키마는 tags를 string[]로 강제하지만 Claude가 가끔 콤마 문자열로 흘려보냄 → 배열로 강제 변환.
+  // 그대로 두면 후속 단계의 tags.join / tags.length가 throw하고 main() catch까지 올라가 시스템 오류 알림이 감.
+  if (!Array.isArray(result.tags)) {
+    if (typeof result.tags === 'string') {
+      result.tags = (result.tags as string).split(/[,，、]/).map((t) => t.trim()).filter(Boolean);
+    } else {
+      result.tags = [];
+    }
+  }
+  result.tags = result.tags.map((t) => String(t).trim()).filter(Boolean);
+
+  if (result.image_alt_suggestions && !Array.isArray(result.image_alt_suggestions)) {
+    result.image_alt_suggestions = [];
+  }
+
   const stripCitations = (s: string) => s.replace(/<\/?cite[^>]*>/g, '');
   result.title = stripCitations(result.title);
   result.summary = stripCitations(result.summary);
@@ -427,6 +440,10 @@ ${operations.content_markdown}
 
 const reporter = new TelegramReporter();
 
+// main()에서 큐를 claim한 직후 여기에 기록 → 어떤 단계에서 throw가 나도
+// module-level catch 핸들러가 같은 항목을 다음 cron에서 재시도하지 않도록 failed 마킹할 수 있음.
+let currentManualQueueId: number | null = null;
+
 async function main() {
   log('Signing in as admin...');
   const { error: authError } = await supabase.auth.signInWithPassword({
@@ -449,6 +466,7 @@ async function main() {
     if (claimErr) console.warn('claim_next_manual_keyword failed (non-fatal):', claimErr.message);
     if (claimed && Array.isArray(claimed) && claimed.length > 0) {
       manualQueueId = claimed[0].id;
+      currentManualQueueId = manualQueueId;
       manualKeyword = claimed[0].keyword;
       manualHint = claimed[0].search_intent_hint;
       log(`📌 Manual queue: using "${manualKeyword}" (queue id=${manualQueueId})`);
@@ -592,6 +610,7 @@ async function main() {
     if (manualQueueId !== null) {
       try { await supabase.rpc('mark_manual_keyword_failed', { queue_id: manualQueueId }); }
       catch (e) { console.warn('mark_manual_keyword_failed failed:', e); }
+      currentManualQueueId = null;
     }
     await reporter.update({
       final: {
@@ -652,6 +671,7 @@ async function main() {
   if (manualQueueId !== null) {
     try { await supabase.rpc('mark_manual_keyword_used', { queue_id: manualQueueId, used_post_id: postId }); }
     catch (e) { console.warn('mark_manual_keyword_used failed:', e); }
+    currentManualQueueId = null;
   }
 
   log('');
@@ -669,6 +689,18 @@ async function main() {
 main().catch(async (err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`\n❌ ${msg}`);
+
+  // 큐 항목을 claim한 채로 도중에 throw가 나면 status='processing' 그대로 남아
+  // 다음 cron이 같은 항목을 다시 잡는 무한 루프 → 여기서 명시적으로 failed 처리.
+  if (currentManualQueueId !== null) {
+    try {
+      await supabase.rpc('mark_manual_keyword_failed', { queue_id: currentManualQueueId });
+      console.log(`✓ Cleaned up stuck queue item ${currentManualQueueId} (marked failed)`);
+    } catch (cleanupErr) {
+      console.warn('Queue cleanup failed:', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
+    }
+  }
+
   await recordFailure(msg);
   await reporter.sendSimpleError(msg);
   process.exit(1);
