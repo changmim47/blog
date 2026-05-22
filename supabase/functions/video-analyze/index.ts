@@ -124,14 +124,17 @@ serve(async (req: Request) => {
       },
     };
 
+    console.log(`[video-analyze] calling Gemini for videoId=${videoId}, model=${GEMINI_MODEL}`);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
     const data = await res.json();
+
     if (!res.ok || data.error) {
       const msg = data.error?.message ?? res.statusText;
+      console.error(`[video-analyze] Gemini API failed: HTTP ${res.status}`, JSON.stringify(data).slice(0, 1500));
       // Gemini가 영상을 가져올 수 없는 경우 (비공개, 지역 제한 등) 안내
       if (typeof msg === 'string' && (msg.includes('inaccessible') || msg.includes('FAILED_PRECONDITION'))) {
         return json({ error: '영상을 불러올 수 없습니다 (비공개/지역제한/삭제됨)' }, 422);
@@ -141,16 +144,21 @@ serve(async (req: Request) => {
 
     const finishReason = data.candidates?.[0]?.finishReason;
     if (finishReason && finishReason !== 'STOP') {
+      console.error(`[video-analyze] truncated: finishReason=${finishReason}`, JSON.stringify(data.candidates?.[0]).slice(0, 800));
       return json({ error: `Response truncated (finishReason=${finishReason})` }, 502);
     }
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return json({ error: 'Gemini returned empty response' }, 502);
+    if (!text) {
+      console.error('[video-analyze] empty response from Gemini', JSON.stringify(data).slice(0, 1500));
+      return json({ error: 'Gemini returned empty response' }, 502);
+    }
 
     let parsed: { summary: string; key_topics: string[]; blog_suggestions: Array<{ title: string; angle: string }> };
     try {
       parsed = JSON.parse(text);
     } catch (e) {
+      console.error('[video-analyze] JSON parse failed:', (e as Error).message, '\nRaw text:', text.slice(0, 800));
       return json({ error: `Failed to parse JSON: ${(e as Error).message}` }, 502);
     }
 
