@@ -1,0 +1,29 @@
+name: Deploy Edge Functions
+
+# supabase/functions/** 변경이 main에 푸시될 때만 실행.
+# 평소 코드(React, scripts) 푸시에는 안 돔.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+      - '.github/workflows/deploy-functions.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # 인자 없이 호출하면 supabase/functions/ 하위 모든 함수 배포.
+      # (youtube-analyze, video-analyze 둘 다 함께 배포됨)
+      - name: Deploy functions
+        run: supabase functions deploy --project-ref $SUPABASE_PROJECT_REF
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
