@@ -463,6 +463,7 @@ const reporter = new TelegramReporter();
 // main()에서 큐를 claim한 직후 여기에 기록 → 어떤 단계에서 throw가 나도
 // module-level catch 핸들러가 같은 항목을 다음 cron에서 재시도하지 않도록 failed 마킹할 수 있음.
 let currentManualQueueId: number | null = null;
+let currentTrendingTopicId: number | null = null;
 
 async function main() {
   log('Signing in as admin...');
@@ -477,33 +478,79 @@ async function main() {
   await reporter.start();
   await reporter.update({ marketing: { status: 'in-progress' } });
 
-  // 0. 관리자 지정 키워드 큐 우선 확인
+  // 우선순위 결정: manual queue → trending topic → autocomplete fallback.
+  // 앞 단계에서 고정 키워드가 잡히면 Marketing은 autocomplete를 건너뛰고 그 키워드로 브리핑만 작성.
   let manualQueueId: number | null = null;
-  let manualKeyword: string | null = null;
-  let manualHint: string | null = null;
+  let trendingTopicId: number | null = null;
+  let fixedKeyword: string | null = null;
+  let fixedHint: string | null = null;
+
+  // 0. Manual queue (관리자가 /admin/youtube에서 직접 추가한 키워드)
   try {
     const { data: claimed, error: claimErr } = await supabase.rpc('claim_next_manual_keyword');
     if (claimErr) console.warn('claim_next_manual_keyword failed (non-fatal):', claimErr.message);
     if (claimed && Array.isArray(claimed) && claimed.length > 0) {
       manualQueueId = claimed[0].id;
       currentManualQueueId = manualQueueId;
-      manualKeyword = claimed[0].keyword;
-      manualHint = claimed[0].search_intent_hint;
-      log(`📌 Manual queue: using "${manualKeyword}" (queue id=${manualQueueId})`);
+      fixedKeyword = claimed[0].keyword;
+      fixedHint = claimed[0].search_intent_hint;
+      log(`📌 Manual queue: using "${fixedKeyword}" (queue id=${manualQueueId})`);
     }
   } catch (e) {
-    console.warn('Queue check failed (non-fatal), falling back to autocomplete:', e);
+    console.warn('Manual queue check failed (non-fatal):', e);
+  }
+
+  // 1. Trending topic (manual이 없으면)
+  if (!fixedKeyword) {
+    try {
+      const { data: topics, error: topicErr } = await supabase.rpc('claim_next_trending_topic');
+      if (topicErr) console.warn('claim_next_trending_topic failed (non-fatal):', topicErr.message);
+      if (topics && Array.isArray(topics) && topics.length > 0) {
+        trendingTopicId = topics[0].id;
+        currentTrendingTopicId = trendingTopicId;
+        const videoId = topics[0].video_id;
+        const videoTitle = topics[0].title;
+        log(`🎬 Trending topic claimed: "${videoTitle}" (videoId=${videoId}, topic id=${trendingTopicId})`);
+
+        // 영상 분석 → blog_suggestions 받기
+        log('   Invoking video-analyze...');
+        const { data: analysis, error: anErr } = await supabase.functions.invoke('video-analyze', {
+          body: { videoId },
+        });
+        if (anErr || !analysis || !Array.isArray(analysis.blogSuggestions) || analysis.blogSuggestions.length === 0) {
+          const reason = anErr?.message ?? 'no blogSuggestions in response';
+          console.warn(`   ⚠️  video-analyze failed/empty: ${reason}. Marking trending topic failed, falling back to autocomplete.`);
+          try { await supabase.rpc('mark_trending_topic_failed', { topic_id: trendingTopicId }); }
+          catch (e) { console.warn('mark_trending_topic_failed call failed:', e); }
+          trendingTopicId = null;
+          currentTrendingTopicId = null;
+        } else {
+          // 첫 번째 제안 선택 (Gemini가 이미 우선순위 순으로 정렬)
+          const picked = analysis.blogSuggestions[0] as { title: string; angle: string };
+          fixedKeyword = picked.title;
+          fixedHint = `[Trending video: ${videoTitle}] ${picked.angle}`;
+          log(`   ✓ Picked suggestion: "${fixedKeyword}"`);
+        }
+      }
+    } catch (e) {
+      console.warn('Trending topic flow failed (non-fatal):', e);
+      if (trendingTopicId !== null) {
+        try { await supabase.rpc('mark_trending_topic_failed', { topic_id: trendingTopicId }); } catch {}
+        trendingTopicId = null;
+        currentTrendingTopicId = null;
+      }
+    }
   }
 
   let marketing: MarketingOutput;
   const pool: SeedSuggestions[] = [];
   const exclusion: ExclusionList = { titles: [], keywords: [] };
 
-  if (manualKeyword) {
-    // 수동 키워드 모드 — autocomplete/dedup 건너뛰고 Marketing이 브리핑만 작성
-    marketing = await runMarketingWithFixedKeyword(manualKeyword, manualHint);
+  if (fixedKeyword) {
+    // 고정 키워드 모드 (manual 또는 trending) — autocomplete/dedup 건너뛰고 Marketing이 브리핑만 작성
+    marketing = await runMarketingWithFixedKeyword(fixedKeyword, fixedHint);
   } else {
-    // 1. Autocomplete pool + dedup (기존 흐름)
+    // 2. Autocomplete fallback (기존 흐름)
     const fetchedPool = await gatherSuggestions();
     pool.push(...fetchedPool);
     const allCandidates = buildCandidates(pool);
@@ -522,7 +569,6 @@ async function main() {
       throw new Error('No non-duplicate candidates available. Try expanding seed pool.');
     }
 
-    // 2. Marketing agent
     marketing = await runMarketing(candidates, exclusion);
   }
 
@@ -624,6 +670,7 @@ async function main() {
         finalQaIssues: qa.issues,
         pool,
         manualQueueId,
+        trendingTopicId,
       }
     );
     // 수동 키워드였으면 큐를 failed로 표시 (다시 안 잡힘)
@@ -631,6 +678,11 @@ async function main() {
       try { await supabase.rpc('mark_manual_keyword_failed', { queue_id: manualQueueId }); }
       catch (e) { console.warn('mark_manual_keyword_failed failed:', e); }
       currentManualQueueId = null;
+    }
+    if (trendingTopicId !== null) {
+      try { await supabase.rpc('mark_trending_topic_failed', { topic_id: trendingTopicId }); }
+      catch (e) { console.warn('mark_trending_topic_failed failed:', e); }
+      currentTrendingTopicId = null;
     }
     await reporter.update({
       final: {
@@ -674,7 +726,8 @@ async function main() {
     topic: draft.title,
     post_id: postId,
     error_message: [
-      manualKeyword ? '[manual queue]' : null,
+      manualQueueId !== null ? '[manual queue]' : null,
+      trendingTopicId !== null ? '[trending topic]' : null,
       revisionCount > 0 ? `Approved after ${revisionCount} revision(s)` : null,
     ].filter(Boolean).join(' ') || null,
     trends_raw: {
@@ -682,6 +735,7 @@ async function main() {
       revisionCount,
       pool,
       manualQueueId,
+      trendingTopicId,
     },
   });
   if (runError) throw new Error(`Insert run failed: ${runError.message}`);
@@ -692,6 +746,11 @@ async function main() {
     try { await supabase.rpc('mark_manual_keyword_used', { queue_id: manualQueueId, used_post_id: postId }); }
     catch (e) { console.warn('mark_manual_keyword_used failed:', e); }
     currentManualQueueId = null;
+  }
+  if (trendingTopicId !== null) {
+    try { await supabase.rpc('mark_trending_topic_used', { topic_id: trendingTopicId, post_id_param: postId }); }
+    catch (e) { console.warn('mark_trending_topic_used failed:', e); }
+    currentTrendingTopicId = null;
   }
 
   log('');
@@ -710,14 +769,22 @@ main().catch(async (err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`\n❌ ${msg}`);
 
-  // 큐 항목을 claim한 채로 도중에 throw가 나면 status='processing' 그대로 남아
+  // 큐 항목을 claim한 채로 도중에 throw가 나면 status='processing'/'claimed' 그대로 남아
   // 다음 cron이 같은 항목을 다시 잡는 무한 루프 → 여기서 명시적으로 failed 처리.
   if (currentManualQueueId !== null) {
     try {
       await supabase.rpc('mark_manual_keyword_failed', { queue_id: currentManualQueueId });
-      console.log(`✓ Cleaned up stuck queue item ${currentManualQueueId} (marked failed)`);
+      console.log(`✓ Cleaned up stuck manual queue item ${currentManualQueueId} (marked failed)`);
     } catch (cleanupErr) {
-      console.warn('Queue cleanup failed:', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
+      console.warn('Manual queue cleanup failed:', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
+    }
+  }
+  if (currentTrendingTopicId !== null) {
+    try {
+      await supabase.rpc('mark_trending_topic_failed', { topic_id: currentTrendingTopicId });
+      console.log(`✓ Cleaned up stuck trending topic ${currentTrendingTopicId} (marked failed)`);
+    } catch (cleanupErr) {
+      console.warn('Trending topic cleanup failed:', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
     }
   }
 

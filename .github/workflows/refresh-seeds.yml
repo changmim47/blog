@@ -1,11 +1,10 @@
 name: Refresh Dynamic Seed Keywords
 
-# 매주 일요일 00:00 UTC = 09:00 KST.
-# 매일 cron(generate-post)이 08:00 KST에 돌므로, 그 1시간 전에 갱신해도 됐지만
-# 같은 시간대 충돌 피하려 1시간 뒤에 잡음.
+# 매일 22:00 UTC = 07:00 KST. generate-post cron(08:00 KST)보다 1시간 전.
+# trending은 빠르게 묵으므로 매일 갱신해야 신선도 유지.
 on:
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '0 22 * * *'
 
   # Actions 탭에서 수동 실행 가능 — 첫 풀 채울 때 사용
   workflow_dispatch:
