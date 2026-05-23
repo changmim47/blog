@@ -1,0 +1,37 @@
+name: Refresh Dynamic Seed Keywords
+
+# 매주 일요일 00:00 UTC = 09:00 KST.
+# 매일 cron(generate-post)이 08:00 KST에 돌므로, 그 1시간 전에 갱신해도 됐지만
+# 같은 시간대 충돌 피하려 1시간 뒤에 잡음.
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+
+  # Actions 탭에서 수동 실행 가능 — 첫 풀 채울 때 사용
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh seed keywords
+        run: npm run refresh-seeds
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          SUPABASE_ADMIN_EMAIL: ${{ secrets.SUPABASE_ADMIN_EMAIL }}
+          SUPABASE_ADMIN_PASSWORD: ${{ secrets.SUPABASE_ADMIN_PASSWORD }}

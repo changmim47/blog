@@ -104,11 +104,31 @@ async function fetchAutocomplete(query: string): Promise<string[]> {
   }
 }
 
+// dynamic_seed_keywords (refresh-seed-keywords cron이 채우는 동적 풀)을 읽어 정적 시드와 합침.
+// 정적 시드는 fallback — 동적 fetch 실패 시에도 시스템은 계속 돌아감.
+async function fetchDynamicSeeds(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('dynamic_seed_keywords')
+    .select('keyword')
+    .eq('is_active', true)
+    .order('last_seen_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    console.warn(`  ⚠️  Dynamic seed fetch failed (non-fatal): ${error.message}`);
+    return [];
+  }
+  return (data ?? [])
+    .map((r: { keyword: string | null }) => r.keyword)
+    .filter((k): k is string => typeof k === 'string' && k.length > 0);
+}
+
 async function gatherSuggestions(): Promise<SeedSuggestions[]> {
-  log(`Gathering autocomplete suggestions for ${SEED_KEYWORDS.length} seeds...`);
+  const dynamicSeeds = await fetchDynamicSeeds();
+  const allSeeds = Array.from(new Set([...SEED_KEYWORDS, ...dynamicSeeds]));
+  log(`Gathering autocomplete suggestions for ${allSeeds.length} seeds (${SEED_KEYWORDS.length} static + ${dynamicSeeds.length} dynamic)...`);
   const result: SeedSuggestions[] = [];
   let totalCount = 0;
-  for (const seed of SEED_KEYWORDS) {
+  for (const seed of allSeeds) {
     const suggestions = await fetchAutocomplete(seed);
     result.push({ seed, suggestions });
     totalCount += suggestions.length;
