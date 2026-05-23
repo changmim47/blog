@@ -8,7 +8,7 @@
     "build": "vite build && tsx scripts/generate-sitemap-rss.ts",
     "preview": "vite preview",
     "generate-post": "tsx scripts/generate-post.ts",
-    "refresh-seeds": "tsx scripts/refresh-seed-keywords.ts"
+    "refresh-trending": "tsx scripts/refresh-trending-topics.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",

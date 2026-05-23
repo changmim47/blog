@@ -1,4 +1,4 @@
-name: Refresh Dynamic Seed Keywords
+name: Refresh Trending Topics
 
 # 매일 22:00 UTC = 07:00 KST. generate-post cron(08:00 KST)보다 1시간 전.
 # trending은 빠르게 묵으므로 매일 갱신해야 신선도 유지.
@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: '0 22 * * *'
 
-  # Actions 탭에서 수동 실행 가능 — 첫 풀 채울 때 사용
+  # Actions 탭에서 수동 실행 가능
   workflow_dispatch:
 
 jobs:
@@ -27,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Refresh seed keywords
-        run: npm run refresh-seeds
+      - name: Refresh trending topics
+        run: npm run refresh-trending
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
