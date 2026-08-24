@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { BlogPost, PostType } from '../types';
 import { MusicIcon, HeartIcon } from './Icons';
 import AdUnit from './AdUnit';
+import { formatDate } from '../utils/date';
 
 interface PostListProps {
   posts: BlogPost[];
@@ -49,7 +50,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
                             <p className="text-white font-medium text-sm line-clamp-1">{post.title}</p>
                             <div className="flex justify-between items-center mt-1">
-                                <span className="text-white/70 text-[10px] uppercase tracking-wider">{new Date(post.createdAt).toLocaleDateString('ko-KR')}</span>
+                                <span className="text-white/70 text-[10px] uppercase tracking-wider">{formatDate(post.createdAt)}</span>
                                 {(post.likes || 0) > 0 && (
                                     <div className="flex items-center text-white/90 text-xs">
                                         <HeartIcon className="w-3 h-3 mr-1 fill-current" solid />
@@ -90,7 +91,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                         <Link href={`/p/${post.id}`} className="block">
                              <div className="flex items-baseline justify-between mb-3 border-b border-slate-100 pb-2">
                                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                    {new Date(post.createdAt).toLocaleDateString('ko-KR')}
+                                    {formatDate(post.createdAt)}
                                 </span>
                                  <div className="flex gap-2">
                                     {post.tags.slice(0, 3).map(tag => (
@@ -177,7 +178,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                 </p>
                 
                 <div className="mt-auto pt-4 border-t border-slate-100 flex justify-center items-center gap-4 text-xs text-slate-400">
-                   <span>{new Date(post.createdAt).toLocaleDateString('ko-KR')}</span>
+                   <span>{formatDate(post.createdAt)}</span>
                    <div className="flex items-center gap-1">
                       <HeartIcon className={`w-3.5 h-3.5 ${post.likes ? 'text-rose-400 fill-rose-400' : ''}`} solid={!!post.likes} />
                       <span>{post.likes || 0}</span>

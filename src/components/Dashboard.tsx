@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { BlogPost } from '../types';
 import { ArrowRightIcon } from './Icons';
 import AdUnit from './AdUnit';
+import { formatDate } from '../utils/date';
 
 interface DashboardProps {
   galleryPosts: BlogPost[];
@@ -156,7 +157,7 @@ const Dashboard: React.FC<DashboardProps> = ({ galleryPosts, playlistPosts, blog
                          </div>
                          <div className="flex-1 min-w-0 py-2">
                              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                {new Date(post.createdAt).toLocaleDateString('ko-KR')}
+                                {formatDate(post.createdAt)}
                              </div>
                              <h4 className="text-2xl font-serif text-slate-900 mb-3 group-hover:text-indigo-600 transition-colors">{post.title}</h4>
                              <p className="text-slate-500 text-sm leading-relaxed line-clamp-2 font-light">{post.summary}</p>

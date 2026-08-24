@@ -10,6 +10,7 @@ import { BlogPost } from '../types';
 import { ChevronLeftIcon, MusicIcon, XMarkIcon, ArrowsPointingOutIcon, HeartIcon, ListBulletIcon, ShareIcon, TrashIcon } from './Icons';
 import AdUnit from './AdUnit';
 import { updatePostLikes, togglePublished, recordPostView, deletePost } from '../services/storage';
+import { formatDate, formatDateLong } from '../utils/date';
 import AuthorBio from './AuthorBio';
 import { useIsAdmin } from './AdminContext';
 
@@ -205,7 +206,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ initialPost, relatedPosts }) =>
                             {post.title}
                         </h1>
                          <div className="text-white/80 text-sm font-light flex items-center gap-3">
-                            <span>{new Date(post.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                            <span>{formatDateLong(post.createdAt)}</span>
                             {post.view_count !== undefined && post.view_count > 0 && (
                                 <>
                                     <span className="opacity-50">·</span>
@@ -231,7 +232,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ initialPost, relatedPosts }) =>
                         {post.title}
                     </h1>
                     <div className="text-slate-400 text-sm font-light flex items-center gap-3">
-                         <span>{new Date(post.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                         <span>{formatDateLong(post.createdAt)}</span>
                         {post.view_count !== undefined && post.view_count > 0 && (
                             <>
                                 <span className="opacity-50">·</span>
@@ -358,7 +359,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ initialPost, relatedPosts }) =>
                                         </div>
                                     )}
                                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
-                                        {new Date(rp.createdAt).toLocaleDateString('ko-KR')}
+                                        {formatDate(rp.createdAt)}
                                     </div>
                                     <h4 className="font-serif text-lg font-medium text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
                                         {rp.title}
