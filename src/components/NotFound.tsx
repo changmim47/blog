@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { ArrowRightIcon } from './Icons';
 
 const NotFound: React.FC = () => {
@@ -19,7 +19,7 @@ const NotFound: React.FC = () => {
       </p>
       
       <Link 
-        to="/" 
+        href="/"
         className="group flex items-center bg-black text-white px-8 py-4 rounded-full hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
       >
         <span className="font-medium tracking-wide text-sm">Return Home</span>

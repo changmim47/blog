@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { AUTHOR } from '../constants/author';
 
 const AuthorBio: React.FC = () => {
@@ -23,7 +23,7 @@ const AuthorBio: React.FC = () => {
             {AUTHOR.bio}
           </p>
           <Link
-            to="/about"
+            href="/about"
             className="inline-block mt-3 text-xs font-medium text-indigo-600 hover:text-indigo-800 border-b border-transparent hover:border-indigo-600 transition-colors"
           >
             About →

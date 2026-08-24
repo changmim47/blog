@@ -18,10 +18,32 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
-    "allowImportingTsExtensions": true,
     "noEmit": true,
     "strict": true,
-    "noImplicitReturns": true
+    "noImplicitReturns": true,
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "esModuleInterop": true,
+    "resolveJsonModule": true
   },
-  "exclude": ["supabase/functions"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "supabase/functions"
+  ]
 }

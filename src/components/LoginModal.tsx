@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LockClosedIcon, XMarkIcon } from './Icons';
@@ -11,11 +13,14 @@ interface LoginModalProps {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSubmit }) => {
+  const [isMounted, setIsMounted] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => setIsMounted(true), []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -41,7 +46,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSubmit }) =>
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !isMounted) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

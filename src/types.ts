@@ -8,6 +8,8 @@ export interface BlogPost {
   content: string;
   summary: string;
   createdAt: number;
+  updatedAt?: number;
+  updated_at?: string;
   tags: string[];
   coverImage?: string;       // 목록 썸네일 & 헤더 배경
   contentImages?: string[];  // 본문 삽입 이미지들 (여러 장)

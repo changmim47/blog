@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { BlogPost } from '../types';
 import { getDraftPosts } from '../services/storage';
 import { TrashIcon } from './Icons';
@@ -52,7 +54,7 @@ const Drafts: React.FC<DraftsProps> = ({ refreshKey, onDeletePost }) => {
               className="relative group bg-white rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all"
             >
               <Link
-                to={`/p/${post.id}`}
+                href={`/p/${post.id}`}
                 className="block p-6 pr-16"
               >
                 <div className="flex items-center gap-2 mb-2">
@@ -62,7 +64,7 @@ const Drafts: React.FC<DraftsProps> = ({ refreshKey, onDeletePost }) => {
                   <span className="text-xs text-slate-400 uppercase tracking-wider">{post.type}</span>
                   <span className="text-xs text-slate-300">·</span>
                   <span className="text-xs text-slate-400">
-                    {new Date(post.createdAt).toLocaleDateString()}
+                    {new Date(post.createdAt).toLocaleDateString('ko-KR')}
                   </span>
                 </div>
                 <h3 className="text-xl font-serif font-medium text-slate-900 mb-1 line-clamp-1">

@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { GenerationRun } from '../types';
 import { getGenerationRuns } from '../services/storage';
 
@@ -113,7 +115,7 @@ const AdminRuns: React.FC = () => {
                   <div className="flex flex-col items-end gap-2 shrink-0">
                     {run.post_id && (
                       <Link
-                        to={`/p/${run.post_id}`}
+                        href={`/p/${run.post_id}`}
                         className="text-xs font-medium text-indigo-600 hover:text-indigo-800 border-b border-transparent hover:border-indigo-600"
                       >
                         View Draft →

@@ -1,14 +1,17 @@
 
+'use client';
+
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import { BlogPost } from '../types';
 import { ChevronLeftIcon, MusicIcon, XMarkIcon, ArrowsPointingOutIcon, HeartIcon, ListBulletIcon, ShareIcon, TrashIcon } from './Icons';
 import AdUnit from './AdUnit';
-import { updatePostLikes, getPostById, togglePublished, getRelatedPosts, recordPostView } from '../services/storage';
-import { AUTHOR, SITE } from '../constants/author';
+import { updatePostLikes, togglePublished, recordPostView, deletePost } from '../services/storage';
 import AuthorBio from './AuthorBio';
+import { useIsAdmin } from './AdminContext';
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h2 className="text-3xl font-bold text-slate-800 mt-8 mb-4">{children}</h2>,
@@ -45,16 +48,14 @@ const markdownComponents: Components = {
 };
 
 interface PostDetailProps {
-  isAdmin: boolean;
-  onDelete?: (id: string) => void;
-  onOpenLogin?: () => void;
+  initialPost: BlogPost;
+  relatedPosts: BlogPost[];
 }
 
-const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin }) => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  
-  const [post, setPost] = useState<BlogPost | undefined>(undefined);
+const PostDetail: React.FC<PostDetailProps> = ({ initialPost, relatedPosts }) => {
+  const router = useRouter();
+  const isAdmin = useIsAdmin();
+  const [post, setPost] = useState<BlogPost>(initialPost);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [likes, setLikes] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
@@ -64,166 +65,21 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
   // Share Feedback State
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
 
-  // Related Posts
-  const [relatedPosts, setRelatedPosts] = useState<BlogPost[]>([]);
-
-  // Loading & Error states
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  // Browser-only interaction state. SEO and article data are rendered by the server page.
   useEffect(() => {
-      if (!id) {
-          setIsLoading(false);
-          setError("Invalid Post ID");
-          return;
-      }
-
-      const initPost = async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const fetchedPost = await getPostById(id);
-            if (fetchedPost) {
-                setPost(fetchedPost);
-            } else {
-                setError("Post not found");
-            }
-        } catch (e) {
-            setError("Failed to load post");
-        } finally {
-            setIsLoading(false);
-        }
-      };
-
-      initPost();
-  }, [id]);
-
-  // Update SEO + structured data + like state when 'post' is set
-  useEffect(() => {
-      if (!post) return;
-
-      const cleanups: Array<() => void> = [];
-
-      // === Title ===
-      const prevTitle = document.title;
-      document.title = `${post.title} | My Space`;
-      cleanups.push(() => { document.title = prevTitle; });
-
-      // === Existing meta description: 값만 바꾸고 cleanup에서 복구 ===
-      const metaDesc = document.querySelector('meta[name="description"]');
-      const prevDesc = metaDesc?.getAttribute('content') ?? '';
-      metaDesc?.setAttribute('content', post.summary || 'A post on My Space');
-      cleanups.push(() => metaDesc?.setAttribute('content', prevDesc));
-
-      // === OG / Twitter / 기타 동적 meta — 새로 만들고 cleanup에서 제거 ===
-      const createdEls: Element[] = [];
-      const addMeta = (attr: 'property' | 'name', key: string, content: string) => {
-        if (!content) return;
-        const el = document.createElement('meta');
-        el.setAttribute(attr, key);
-        el.setAttribute('content', content);
-        document.head.appendChild(el);
-        createdEls.push(el);
-      };
-
-      const pageUrl = window.location.href;
-      addMeta('property', 'og:type', 'article');
-      addMeta('property', 'og:url', pageUrl);
-      addMeta('property', 'og:title', post.title);
-      addMeta('property', 'og:description', post.summary || '');
-      addMeta('property', 'og:site_name', 'My Space');
-      if (post.coverImage) addMeta('property', 'og:image', post.coverImage);
-
-      addMeta('name', 'twitter:card', 'summary_large_image');
-      addMeta('name', 'twitter:title', post.title);
-      addMeta('name', 'twitter:description', post.summary || '');
-      if (post.coverImage) addMeta('name', 'twitter:image', post.coverImage);
-
-      // === Schema.org JSON-LD (BlogPosting) ===
-      const publishedIso = new Date(post.createdAt).toISOString();
-      const jsonLd: Record<string, unknown> = {
-        '@context': 'https://schema.org',
-        '@type': 'BlogPosting',
-        headline: post.title,
-        description: post.summary || '',
-        datePublished: publishedIso,
-        dateModified: publishedIso,
-        author: {
-          '@type': 'Person',
-          name: AUTHOR.name,
-          url: AUTHOR.url,
-          description: AUTHOR.bio,
-        },
-        publisher: {
-          '@type': 'Organization',
-          name: SITE.name,
-          url: SITE.url,
-          logo: {
-            '@type': 'ImageObject',
-            url: `${window.location.origin}/favicon.svg`,
-          },
-        },
-        mainEntityOfPage: {
-          '@type': 'WebPage',
-          '@id': pageUrl,
-        },
-      };
-      if (post.coverImage) jsonLd.image = post.coverImage;
-      if (post.tags && post.tags.length > 0) jsonLd.keywords = post.tags.join(', ');
-
-      const script = document.createElement('script');
-      script.type = 'application/ld+json';
-      script.textContent = JSON.stringify(jsonLd);
-      document.head.appendChild(script);
-      createdEls.push(script);
-
-      cleanups.push(() => {
-        createdEls.forEach((el) => el.parentNode?.removeChild(el));
-      });
-
-      // === Like state ===
       const liked = localStorage.getItem(`liked_${post.id}`);
       if (liked) setIsLiked(true);
       setLikes(post.likes || 0);
       setShowFloatingBar(true);
-
-      return () => {
-          cleanups.forEach((fn) => fn());
-      };
-  }, [post]);
-
-  // Fetch related posts when 'post' changes
-  useEffect(() => {
-      if (!post) return;
-      let cancelled = false;
-      getRelatedPosts(post.id, post.tags ?? [], post.type, 3).then((related) => {
-          if (!cancelled) setRelatedPosts(related);
-      });
-      return () => {
-          cancelled = true;
-      };
-  }, [post]);
+  }, [post.id, post.likes]);
 
   // Record view (admin은 제외 — 본인 방문은 카운트하지 않음)
   useEffect(() => {
-      if (!post || isAdmin) return;
+      if (isAdmin) return;
       recordPostView(post.id);
   }, [post, isAdmin]);
 
-  // 글을 못 찾는 경우 (삭제/비공개 draft 등) noindex 메타 추가 → Google이 soft 404로 인덱싱 안 함
-  useEffect(() => {
-      if (!error) return;
-      const meta = document.createElement('meta');
-      meta.setAttribute('name', 'robots');
-      meta.setAttribute('content', 'noindex');
-      document.head.appendChild(meta);
-      return () => {
-          meta.parentNode?.removeChild(meta);
-      };
-  }, [error]);
-
   const handleLike = async () => {
-      if (!post) return;
       const newIsLiked = !isLiked;
       const newLikes = newIsLiked ? likes + 1 : likes - 1;
       
@@ -270,68 +126,11 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
   }
 
   const handleBack = () => {
-      if (!post) {
-          navigate('/');
-          return;
-      }
-      if (post.type === 'gallery') navigate('/gallery');
-      else if (post.type === 'playlist') navigate('/playlist');
-      else if (post.type === 'blog') navigate('/blog');
-      else navigate(-1);
+      if (post.type === 'gallery') router.push('/gallery');
+      else if (post.type === 'playlist') router.push('/playlist');
+      else if (post.type === 'blog') router.push('/blog');
+      else router.back();
   };
-
-  if (isLoading) {
-      return (
-        <div className="min-h-[60vh] flex flex-col items-center justify-center">
-             <div className="w-10 h-10 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-             <p className="text-slate-400 font-serif italic">Loading story...</p>
-        </div>
-      );
-  }
-
-  if (error || !post) {
-      // 비로그인 상태 + Post not found = 십중팔구 비공개 초안. 로그인 안내로 분기.
-      const looksLikeDraft = !isAdmin && error === 'Post not found';
-
-      return (
-          <div className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4">
-              {looksLikeDraft ? (
-                  <>
-                      <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">로그인이 필요합니다</h2>
-                      <p className="text-slate-500 mb-2">이 글은 비공개 초안일 수 있습니다.</p>
-                      <p className="text-slate-400 text-sm mb-8">관리자 로그인 후 다시 시도해 주세요.</p>
-                      <div className="flex gap-3">
-                          {onOpenLogin && (
-                              <button
-                                  onClick={onOpenLogin}
-                                  className="bg-black text-white px-6 py-3 rounded-full hover:bg-slate-800 transition-colors text-sm font-medium"
-                              >
-                                  Sign In
-                              </button>
-                          )}
-                          <button
-                              onClick={() => navigate('/')}
-                              className="bg-white text-slate-700 border border-slate-300 px-6 py-3 rounded-full hover:bg-slate-50 transition-colors text-sm font-medium"
-                          >
-                              Go Home
-                          </button>
-                      </div>
-                  </>
-              ) : (
-                  <>
-                      <h2 className="text-3xl font-serif font-bold text-slate-800 mb-4">Post Not Found</h2>
-                      <p className="text-slate-500 mb-8">{error || "The story you are looking for doesn't exist or has been removed."}</p>
-                      <button
-                          onClick={() => navigate('/')}
-                          className="bg-black text-white px-6 py-3 rounded-full hover:bg-slate-800 transition-colors"
-                      >
-                          Go Home
-                      </button>
-                  </>
-              )}
-          </div>
-      );
-  }
 
   const contentImages = post.contentImages || (post.contentImage ? [post.contentImage] : []);
   const usedImageIndices = new Set<number>();
@@ -350,12 +149,12 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                     <figure key={index} className="my-8 group relative block">
                         <img
                             src={contentImages[imgIndex]}
-                            alt={`Content ${imgIndex + 1}`}
+                            alt={`${post.title} 본문 이미지 ${imgIndex + 1}`}
                             className="w-full h-auto rounded-lg shadow-md cursor-zoom-in"
                             onClick={() => setSelectedImage(contentImages[imgIndex])}
                         />
                          <figcaption className="text-center text-xs text-slate-400 mt-2 italic font-serif">
-                             Image {imgIndex + 1}
+                             {post.title} 이미지 {imgIndex + 1}
                          </figcaption>
                     </figure>
                   );
@@ -406,7 +205,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                             {post.title}
                         </h1>
                          <div className="text-white/80 text-sm font-light flex items-center gap-3">
-                            <span>{new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                            <span>{new Date(post.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                             {post.view_count !== undefined && post.view_count > 0 && (
                                 <>
                                     <span className="opacity-50">·</span>
@@ -432,7 +231,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                         {post.title}
                     </h1>
                     <div className="text-slate-400 text-sm font-light flex items-center gap-3">
-                        <span>{new Date(post.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                         <span>{new Date(post.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                         {post.view_count !== undefined && post.view_count > 0 && (
                             <>
                                 <span className="opacity-50">·</span>
@@ -474,20 +273,23 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                             {post.published === false ? 'Publish Now' : 'Move to Drafts'}
                         </button>
                         <Link
-                            to={`/edit/${post.id}`}
+                            href={`/edit?id=${encodeURIComponent(post.id)}`}
                             className="text-slate-400 hover:text-indigo-600 text-xs font-medium border-b border-transparent hover:border-indigo-600 transition-colors pb-0.5"
                         >
                             Edit Post
                         </Link>
-                        {onDelete && (
-                            <button
-                                onClick={() => onDelete(post.id)}
-                                className="text-slate-400 hover:text-red-600 text-xs font-medium border-b border-transparent hover:border-red-600 transition-colors pb-0.5 flex items-center gap-1"
-                            >
-                                <TrashIcon className="w-3 h-3" />
-                                Delete
-                            </button>
-                        )}
+                        <button
+                            onClick={async () => {
+                                if (!window.confirm('정말 이 글을 삭제하시겠습니까?')) return;
+                                await deletePost(post.id);
+                                router.push('/');
+                                router.refresh();
+                            }}
+                            className="text-slate-400 hover:text-red-600 text-xs font-medium border-b border-transparent hover:border-red-600 transition-colors pb-0.5 flex items-center gap-1"
+                        >
+                            <TrashIcon className="w-3 h-3" />
+                            Delete
+                        </button>
                     </div>
                 )}
 
@@ -507,9 +309,9 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                 )}
 
                 {/* Main Content (Parsed Text with Images) */}
-                <div className="prose prose-lg prose-slate max-w-none font-light leading-loose text-slate-700">
+                <article className="prose prose-lg prose-slate max-w-none font-light leading-loose text-slate-700">
                     {contentNodes}
-                </div>
+                </article>
 
                 {/* Gallery Grid for Unused Images */}
                 {unusedImages.length > 0 && (
@@ -520,7 +322,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                                 <div key={idx} className="break-inside-avoid rounded-xl overflow-hidden cursor-zoom-in hover:opacity-90 transition-opacity">
                                     <img 
                                         src={img} 
-                                        alt={`Gallery ${idx}`} 
+                                        alt={`${post.title} 갤러리 이미지 ${idx + 1}`}
                                         className="w-full h-auto" 
                                         onClick={() => setSelectedImage(img)}
                                     />
@@ -542,7 +344,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                             {relatedPosts.map((rp) => (
                                 <Link
                                     key={rp.id}
-                                    to={`/p/${rp.id}`}
+                                    href={`/p/${rp.id}`}
                                     className="group block"
                                 >
                                     {rp.coverImage && (
@@ -556,7 +358,7 @@ const PostDetail: React.FC<PostDetailProps> = ({ isAdmin, onDelete, onOpenLogin 
                                         </div>
                                     )}
                                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
-                                        {new Date(rp.createdAt).toLocaleDateString()}
+                                        {new Date(rp.createdAt).toLocaleDateString('ko-KR')}
                                     </div>
                                     <h4 className="font-serif text-lg font-medium text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
                                         {rp.title}

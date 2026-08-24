@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../services/supabaseClient';
@@ -29,12 +31,15 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
   videoThumbnail,
   onClose,
 }) => {
+  const [isMounted, setIsMounted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [queuedTitles, setQueuedTitles] = useState<Set<string>>(new Set());
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => setIsMounted(true), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +111,8 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
       setQueueMessage(`❌ ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+
+  if (!isMounted) return null;
 
   // 모달을 body 직속에 렌더 — 부모의 transform/filter 등이 fixed 위치를 망가뜨리지 않도록
   return createPortal(

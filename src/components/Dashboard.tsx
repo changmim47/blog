@@ -1,37 +1,17 @@
 
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React from 'react';
+import Link from 'next/link';
 import { BlogPost } from '../types';
 import { ArrowRightIcon } from './Icons';
-import { getRecentPosts } from '../services/storage';
 import AdUnit from './AdUnit';
 
 interface DashboardProps {
-  refreshKey: number;
+  galleryPosts: BlogPost[];
+  playlistPosts: BlogPost[];
+  blogPosts: BlogPost[];
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
-  const [galleryPosts, setGalleryPosts] = useState<BlogPost[]>([]);
-  const [playlistPosts, setPlaylistPosts] = useState<BlogPost[]>([]);
-  const [blogPosts, setBlogPosts] = useState<BlogPost[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      getRecentPosts('gallery', 4),
-      getRecentPosts('playlist', 3),
-      getRecentPosts('blog', 3),
-    ]).then(([gallery, playlist, blog]) => {
-      if (cancelled) return;
-      setGalleryPosts(gallery);
-      setPlaylistPosts(playlist);
-      setBlogPosts(blog);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-
+const Dashboard: React.FC<DashboardProps> = ({ galleryPosts, playlistPosts, blogPosts }) => {
   return (
     <div className="flex flex-col gap-20 animate-fade-in-up pb-12">
       {/* Hero / Intro */}
@@ -53,7 +33,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 <h3 className="text-3xl font-serif font-medium text-slate-900">📷 Recent Photo</h3>
             </div>
             <Link 
-                to="/gallery"
+                href="/gallery"
                 className="text-sm font-medium text-slate-500 hover:text-black transition-colors flex items-center group"
             >
                 View All
@@ -66,7 +46,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 {galleryPosts.map((post, idx) => (
                     <Link 
                         key={post.id}
-                        to={`/p/${post.id}`}
+                        href={`/p/${post.id}`}
                         className={`relative aspect-[3/4] overflow-hidden cursor-pointer group ${idx % 2 === 0 ? 'rounded-tl-3xl rounded-br-3xl' : 'rounded-tr-3xl rounded-bl-3xl'}`}
                     >
                         <img 
@@ -97,7 +77,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 <h3 className="text-3xl font-serif font-medium text-slate-900">🎵 Song</h3>
             </div>
             <Link 
-                to="/playlist"
+                href="/playlist"
                 className="text-sm font-medium text-slate-500 hover:text-black transition-colors flex items-center group"
             >
                 View All
@@ -110,7 +90,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 {playlistPosts.map(post => (
                     <Link 
                         key={post.id}
-                        to={`/p/${post.id}`}
+                        href={`/p/${post.id}`}
                         className="group cursor-pointer"
                     >
                         <div className="aspect-square overflow-hidden rounded-2xl shadow-sm mb-4 relative">
@@ -148,7 +128,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 <h3 className="text-3xl font-serif font-medium text-slate-900">🧾 My Note</h3>
             </div>
             <Link 
-                to="/blog"
+                href="/blog"
                 className="text-sm font-medium text-slate-500 hover:text-black transition-colors flex items-center group"
             >
                 View All
@@ -161,7 +141,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                 {blogPosts.map(post => (
                     <Link 
                         key={post.id}
-                        to={`/p/${post.id}`}
+                        href={`/p/${post.id}`}
                         className="group flex flex-col md:flex-row gap-6 cursor-pointer items-start"
                     >
                          <div className="w-full md:w-64 aspect-[3/2] rounded-lg overflow-hidden bg-slate-100 shrink-0">
@@ -176,7 +156,7 @@ const Dashboard: React.FC<DashboardProps> = ({ refreshKey }) => {
                          </div>
                          <div className="flex-1 min-w-0 py-2">
                              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                {new Date(post.createdAt).toLocaleDateString()}
+                                {new Date(post.createdAt).toLocaleDateString('ko-KR')}
                              </div>
                              <h4 className="text-2xl font-serif text-slate-900 mb-3 group-hover:text-indigo-600 transition-colors">{post.title}</h4>
                              <p className="text-slate-500 text-sm leading-relaxed line-clamp-2 font-light">{post.summary}</p>

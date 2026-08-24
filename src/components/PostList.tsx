@@ -1,6 +1,8 @@
 
+'use client';
+
 import React from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { BlogPost, PostType } from '../types';
 import { MusicIcon, HeartIcon } from './Icons';
 import AdUnit from './AdUnit';
@@ -37,7 +39,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                     key={post.id}
                     className="break-inside-avoid group relative rounded-xl overflow-hidden cursor-pointer bg-slate-200"
                 >
-                    <Link to={`/p/${post.id}`} className="block">
+                    <Link href={`/p/${post.id}`} className="block">
                         <img 
                             src={post.coverImage} 
                             alt={post.title} 
@@ -47,7 +49,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
                             <p className="text-white font-medium text-sm line-clamp-1">{post.title}</p>
                             <div className="flex justify-between items-center mt-1">
-                                <span className="text-white/70 text-[10px] uppercase tracking-wider">{new Date(post.createdAt).toLocaleDateString()}</span>
+                                <span className="text-white/70 text-[10px] uppercase tracking-wider">{new Date(post.createdAt).toLocaleDateString('ko-KR')}</span>
                                 {(post.likes || 0) > 0 && (
                                     <div className="flex items-center text-white/90 text-xs">
                                         <HeartIcon className="w-3 h-3 mr-1 fill-current" solid />
@@ -85,10 +87,10 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                     )}
                     
                     <article className="group cursor-pointer">
-                        <Link to={`/p/${post.id}`} className="block">
+                        <Link href={`/p/${post.id}`} className="block">
                              <div className="flex items-baseline justify-between mb-3 border-b border-slate-100 pb-2">
                                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                    {new Date(post.createdAt).toLocaleDateString()}
+                                    {new Date(post.createdAt).toLocaleDateString('ko-KR')}
                                 </span>
                                  <div className="flex gap-2">
                                     {post.tags.slice(0, 3).map(tag => (
@@ -146,7 +148,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-12 pb-20">
       {posts.map((post) => (
         <article key={post.id} className="group cursor-pointer flex flex-col h-full">
-          <Link to={`/p/${post.id}`} className="flex flex-col h-full">
+          <Link href={`/p/${post.id}`} className="flex flex-col h-full">
               <div className="relative aspect-square overflow-hidden rounded-2xl shadow-lg shadow-slate-200 mb-6 group-hover:shadow-xl group-hover:shadow-indigo-100 transition-all duration-500">
                 <img 
                     src={post.coverImage} 
@@ -175,7 +177,7 @@ const PostList: React.FC<PostListProps> = ({ posts, section, onDeletePost, isAdm
                 </p>
                 
                 <div className="mt-auto pt-4 border-t border-slate-100 flex justify-center items-center gap-4 text-xs text-slate-400">
-                   <span>{new Date(post.createdAt).toLocaleDateString()}</span>
+                   <span>{new Date(post.createdAt).toLocaleDateString('ko-KR')}</span>
                    <div className="flex items-center gap-1">
                       <HeartIcon className={`w-3.5 h-3.5 ${post.likes ? 'text-rose-400 fill-rose-400' : ''}`} solid={!!post.likes} />
                       <span>{post.likes || 0}</span>

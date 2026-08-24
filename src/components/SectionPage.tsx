@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from 'react';
+'use client';
+
+import React, { useState } from 'react';
 import { BlogPost, PostType } from '../types';
 import { getPostsPaginated } from '../services/storage';
 import PostList from './PostList';
+import { useIsAdmin } from './AdminContext';
 
 const PAGE_SIZE = 20;
 
@@ -9,37 +12,30 @@ interface SectionPageProps {
   type: PostType;
   title: string;
   subtitle: string;
-  isAdmin: boolean;
-  onDeletePost: (e: React.MouseEvent, id: string) => void;
-  refreshKey: number;
+  initialPosts: BlogPost[];
+  initialHasMore: boolean;
 }
 
 const SectionPage: React.FC<SectionPageProps> = ({
   type,
   title,
   subtitle,
-  isAdmin,
-  onDeletePost,
-  refreshKey,
+  initialPosts,
+  initialHasMore,
 }) => {
-  const [posts, setPosts] = useState<BlogPost[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const isAdmin = useIsAdmin();
+  const [posts, setPosts] = useState<BlogPost[]>(initialPosts);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(initialHasMore);
 
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
-    getPostsPaginated(type, PAGE_SIZE, 0).then(({ posts: loaded, hasMore: more }) => {
-      if (cancelled) return;
-      setPosts(loaded);
-      setHasMore(more);
-      setIsLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [type, refreshKey]);
+  const onDeletePost = async (event: React.MouseEvent, id: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!window.confirm('정말 이 글을 삭제하시겠습니까?')) return;
+    const { deletePost } = await import('../services/storage');
+    await deletePost(id);
+    setPosts((current) => current.filter((post) => post.id !== id));
+  };
 
   const loadMore = async () => {
     if (isLoadingMore || !hasMore) return;
@@ -60,12 +56,7 @@ const SectionPage: React.FC<SectionPageProps> = ({
         <p className="text-slate-500 text-lg font-light italic font-serif">{subtitle}</p>
       </header>
 
-      {isLoading ? (
-        <div className="flex justify-center py-20">
-          <div className="w-6 h-6 border-2 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        </div>
-      ) : (
-        <>
+      <>
           <PostList posts={posts} section={type} onDeletePost={onDeletePost} isAdmin={isAdmin} />
 
           {hasMore && (
@@ -86,8 +77,7 @@ const SectionPage: React.FC<SectionPageProps> = ({
               </button>
             </div>
           )}
-        </>
-      )}
+      </>
     </div>
   );
 };

@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useRef } from 'react';
 
 /**
@@ -5,20 +7,20 @@ import React, { useEffect, useRef } from 'react';
  *
  * 활성화 단계:
  *   1) AdSense 가입 → publisher ID 발급 (예: ca-pub-1234567890123456)
- *   2) 환경변수 VITE_ADSENSE_CLIENT 설정 → 사이트에 AdSense 스크립트 로드
+ *   2) 환경변수 NEXT_PUBLIC_ADSENSE_CLIENT 설정 → 사이트에 AdSense 스크립트 로드
  *      - 이 단계만 해도 심사 신청 가능 (스크립트 통합 검증)
  *   3) 심사 통과 후 AdSense 대시보드에서 광고 단위 생성 → slot ID 발급
- *   4) 환경변수 VITE_ADSENSE_SLOT_BANNER / _INFEED / _RECTANGLE 설정
+ *   4) 환경변수 NEXT_PUBLIC_ADSENSE_SLOT_BANNER / _INFEED / _RECTANGLE 설정
  *      - 이때부터 실제 광고가 슬롯에 채워짐
  *
  * publisher ID나 slot ID 없으면 깨끗하게 nothing 렌더 (UX 보호).
  */
 
-const AD_CLIENT = import.meta.env.VITE_ADSENSE_CLIENT;
+const AD_CLIENT = process.env.NEXT_PUBLIC_ADSENSE_CLIENT;
 const AD_SLOTS: Record<string, string | undefined> = {
-  banner: import.meta.env.VITE_ADSENSE_SLOT_BANNER,
-  'in-feed': import.meta.env.VITE_ADSENSE_SLOT_INFEED,
-  rectangle: import.meta.env.VITE_ADSENSE_SLOT_RECTANGLE,
+  banner: process.env.NEXT_PUBLIC_ADSENSE_SLOT_BANNER,
+  'in-feed': process.env.NEXT_PUBLIC_ADSENSE_SLOT_INFEED,
+  rectangle: process.env.NEXT_PUBLIC_ADSENSE_SLOT_RECTANGLE,
 };
 
 interface AdUnitProps {

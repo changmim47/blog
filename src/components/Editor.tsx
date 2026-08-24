@@ -1,6 +1,8 @@
 
+'use client';
+
 import React, { useState, useRef, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'next/navigation';
 import { BlogPost, PostType } from '../types';
 import { 
     ChevronLeftIcon, MusicIcon, CameraIcon, CloudArrowUpIcon, 
@@ -18,9 +20,9 @@ interface EditorProps {
 }
 
 const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCancel, isEdit }) => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
+  // /edit?id=... (정적 익스포트에서는 동적 세그먼트 대신 쿼리 파라미터를 쓴다)
+  const id = searchParams.get('id') ?? '';
   const urlType = searchParams.get('type') as PostType | null;
   
   // Set initial post type based on URL params (new post) or existing data (edit)

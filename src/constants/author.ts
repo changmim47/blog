@@ -5,7 +5,7 @@
  * 본인 정보로 자유롭게 수정하세요.
  */
 export const AUTHOR = {
-  name: 'My Space',                                              // 표시 이름 (실명 또는 닉네임)
+  name: 'Daily Memorylog',                                       // 표시 이름 (실명 또는 닉네임)
   alias: '1인 블로거',                                           // 한 줄 직함/태그라인
   bio: '일상에서 새로 알게 된 도구·서비스·정보를 직접 써보고 솔직하게 정리합니다. 매일 새 글이 발행됩니다.',
   url: 'https://daily-memorylog.com/about',                      // About 페이지 URL
@@ -13,7 +13,8 @@ export const AUTHOR = {
 };
 
 export const SITE = {
-  name: 'My Space',
+  name: 'Daily Memorylog',
   url: 'https://daily-memorylog.com',
-  description: '직접 써보고 알아본 도구·서비스·정보·트렌드를 솔직하게 정리하는 1인 블로그',
+  title: 'Daily Memorylog | AI 도구·자동화 실사용 기록',
+  description: 'ChatGPT, Claude, Gemini 등 다양한 AI 도구와 자동화, 개발 및 생산성 도구를 직접 사용하고 경험한 내용을 기록하는 블로그입니다.',
 };

@@ -15,16 +15,16 @@ import { TelegramReporter } from './telegram';
 
 dotenvConfig({ path: '.env.local' });
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_KEY;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_KEY;
 const ADMIN_EMAIL = process.env.SUPABASE_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.SUPABASE_ADMIN_PASSWORD;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !ADMIN_EMAIL || !ADMIN_PASSWORD || !ANTHROPIC_API_KEY) {
   console.error('❌ Missing required env vars in .env.local:');
-  if (!SUPABASE_URL) console.error('  - VITE_SUPABASE_URL');
-  if (!SUPABASE_KEY) console.error('  - VITE_SUPABASE_KEY');
+  if (!SUPABASE_URL) console.error('  - NEXT_PUBLIC_SUPABASE_URL');
+  if (!SUPABASE_KEY) console.error('  - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
   if (!ADMIN_EMAIL) console.error('  - SUPABASE_ADMIN_EMAIL');
   if (!ADMIN_PASSWORD) console.error('  - SUPABASE_ADMIN_PASSWORD');
   if (!ANTHROPIC_API_KEY) console.error('  - ANTHROPIC_API_KEY');
