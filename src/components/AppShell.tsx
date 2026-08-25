@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import type { BlogPost } from '../types';
 import { SITE } from '../constants/author';
 import * as storage from '../services/storage';
@@ -14,7 +14,6 @@ import { AdminContext } from './AdminContext';
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [visitorStats, setVisitorStats] = useState({ today: 0, total: 0 });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -41,9 +40,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
       }
     });
 
+    // 정적 익스포트에는 다시 렌더할 서버 컴포넌트가 없어서 router.refresh()가 하는 일이 없다.
+    // 오히려 토큰 갱신 때마다 불필요한 리렌더/재요청을 유발하므로 호출하지 않는다.
+    // 관리자 UI는 아래 setIsAdmin으로 갱신된다.
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAdmin(Boolean(session));
-      router.refresh();
     });
     unsubscribe = () => data.subscription.unsubscribe();
 
@@ -52,7 +53,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       active = false;
       unsubscribe?.();
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -95,8 +96,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     event.stopPropagation();
     if (!window.confirm('정말 이 글을 삭제하시겠습니까?')) return;
     await storage.deletePost(id);
+    // setSearchablePosts(null)이 다음 검색 때 다시 불러오므로 router.refresh()는 불필요하다.
     setSearchablePosts(null);
-    router.refresh();
   };
 
   const handleLogin = async (email: string, password: string) => {

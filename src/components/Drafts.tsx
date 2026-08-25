@@ -54,8 +54,13 @@ const Drafts: React.FC<DraftsProps> = ({ refreshKey, onDeletePost }) => {
               key={post.id}
               className="relative group bg-white rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all"
             >
+              {/*
+                초안은 정적 생성 대상이 아니라 /p/{id} 경로가 존재하지 않는다.
+                거기로 보내면 클라이언트 라우터가 없는 RSC를 반복 요청하며 새로고침 루프에 빠진다.
+                초안은 편집기로 보낸다 — 내용 확인과 발행을 여기서 모두 할 수 있다.
+              */}
               <Link
-                href={`/p/${post.id}`}
+                href={`/edit?id=${encodeURIComponent(post.id)}`}
                 className="block p-6 pr-16"
               >
                 <div className="flex items-center gap-2 mb-2">
