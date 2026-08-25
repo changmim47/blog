@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "//prebuild": "sitemap/rss/robots는 dynamic='force-static'이라 fetch 기본값이 force-cache가 된다. Render가 .next/cache를 복원하면 지난 빌드의 Supabase 응답이 재사용되어 새 글이 사이트맵에서 누락된다. 데이터 캐시만 비우고 컴파일 캐시는 남긴다.",
+    "prebuild": "node -e \"require('fs').rmSync('.next/cache/fetch-cache',{recursive:true,force:true})\"",
     "build": "next build",
     "preview": "npx --yes serve out",
     "generate-post": "tsx scripts/generate-post.ts",
