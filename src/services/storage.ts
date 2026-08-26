@@ -1,6 +1,7 @@
 
 import { supabase } from './supabaseClient';
 import { BlogPost, PostType, GenerationRun } from '../types';
+import { todaySeoul } from '../utils/date';
 
 const TABLE_NAME = 'posts';
 // 사용자가 생성한 Supabase Storage Bucket 이름으로 변경
@@ -304,7 +305,7 @@ export const recordPostView = async (postId: string): Promise<void> => {
 };
 
 export const getVisitorStats = async (): Promise<{ today: number, total: number }> => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todaySeoul();
 
   // 1. Get Total (Sum of all counts)
   const { data: allData } = await supabase

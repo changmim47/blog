@@ -22,3 +22,13 @@ export function formatDateLong(value: number | string | Date): string {
     day: 'numeric',
   });
 }
+
+/**
+ * 오늘 날짜를 KST 기준 'YYYY-MM-DD'로 반환한다.
+ * visitor_stats.date와 비교할 때 사용 — DB의 increment_visit도 KST 날짜로 기록하므로
+ * toISOString()(UTC)을 쓰면 KST 자정~오전 9시 사이에 어제 날짜를 조회하게 된다.
+ * (en-CA 로케일은 YYYY-MM-DD 형식을 낸다.)
+ */
+export function todaySeoul(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: TIME_ZONE });
+}
