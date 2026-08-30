@@ -6,8 +6,12 @@ import Anthropic from '@anthropic-ai/sdk';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 
-// 환경변수로 모델 변경 가능 (예: claude-haiku-4-5, claude-opus-4-7)
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+// 환경변수로 모델 변경 가능 (예: claude-haiku-4-5, claude-opus-5)
+// 본문(marketing/operations)은 최신 세대, QA는 다른 모델로 분리한다 —
+// 같은 모델이 자기 글을 검수하면 쓰면서 못 느낀 문제를 검수에서도 못 잡는다
+// (실제로 summary 150자 규칙이 같은-모델 QA를 10/47건 통과했다).
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+const ANTHROPIC_MODEL_QA = process.env.ANTHROPIC_MODEL_QA || 'claude-sonnet-4-6';
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 const MAX_ATTEMPTS = 4;
@@ -79,7 +83,7 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
   }
 
   const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
-    model: ANTHROPIC_MODEL,
+    model: agentName === 'qa' ? ANTHROPIC_MODEL_QA : ANTHROPIC_MODEL,
     max_tokens: maxTokens,
     system: systemInstruction,
     tools,

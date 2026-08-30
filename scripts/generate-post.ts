@@ -41,15 +41,18 @@ const MAX_REVISIONS = 2;
 // 모든 에이전트 호출에 prepend되는 현재 시점 정보.
 // LLM은 학습 시점을 기본 가정하므로 명시적으로 주입해야 작년 데이터를 최신으로 오인하지 않음.
 function buildCurrentContext(): string {
+  // cron은 UTC 23:00(= KST 다음날 오전 8시)에 돈다. 러너가 UTC라서 타임존을
+  // 고정하지 않으면 "오늘 날짜"가 항상 한국 기준 어제로 주입된다.
   const now = new Date();
   const koreanDate = now.toLocaleDateString('ko-KR', {
+    timeZone: 'Asia/Seoul',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
     weekday: 'long',
   });
-  const isoDate = now.toISOString().split('T')[0];
-  const year = now.getFullYear();
+  const isoDate = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const year = Number(isoDate.slice(0, 4));
   return `[현재 시점 정보 — 반드시 이 기준으로 작성]
 - 오늘 날짜: ${koreanDate} (${isoDate})
 - 현재 연도: ${year}년
@@ -393,7 +396,7 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
 
   const stripCitations = (s: string) => s.replace(/<\/?cite[^>]*>/g, '');
   result.title = stripCitations(result.title);
-  result.summary = stripCitations(result.summary);
+  result.summary = clampSummary(stripCitations(result.summary));
   result.content_markdown = stripCitations(result.content_markdown);
   if (result.image_alt_suggestions) {
     result.image_alt_suggestions = result.image_alt_suggestions.map((i) => ({
@@ -407,6 +410,23 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
   log(`  ✓ Operations title: ${result.title}`);
   log(`  ✓ Body: ${result.content_markdown.length} chars, ${result.tags.length} tags`);
   return result;
+}
+
+/**
+ * summary(메타 디스크립션)를 150자 이내로 강제한다.
+ * 프롬프트의 "150자 이내" 지시만으로는 47건 중 10건이 초과했다(최대 157자) —
+ * 초과분은 검색결과에서 문장 중간에 잘려 나가므로 코드에서 문장 경계로 자른다.
+ */
+function clampSummary(summary: string, max = 150): string {
+  const s = summary.trim();
+  if (s.length <= max) return s;
+  const head = s.slice(0, max);
+  // 잘린 조각 안에서 마지막 문장 종결 위치를 찾는다 (., !, ?, 다./요. 등)
+  const lastEnd = Math.max(head.lastIndexOf('.'), head.lastIndexOf('!'), head.lastIndexOf('?'));
+  if (lastEnd >= 60) return head.slice(0, lastEnd + 1).trim();
+  // 문장 경계를 못 찾으면 어절 경계에서 자르고 말줄임
+  const lastSpace = head.lastIndexOf(' ');
+  return (lastSpace >= 60 ? head.slice(0, lastSpace) : head.slice(0, max - 1)).trim() + '…';
 }
 
 async function runQa(operations: OperationsOutput): Promise<QaOutput> {
