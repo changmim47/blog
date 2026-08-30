@@ -170,16 +170,31 @@ async function fetchUnsplashImage(query: string): Promise<string | null> {
 }
 
 async function pickCoverImage(query: string): Promise<string> {
-  log(`📸 Fetching cover image: "${query}"`);
-  const unsplashUrl = await fetchUnsplashImage(query);
-  if (unsplashUrl) {
-    log(`  ✓ Unsplash matched`);
-    return unsplashUrl;
+  // Unsplash 검색은 단어를 전부 만족해야 해서 검색어가 구체적일수록 통째로 실패한다.
+  // 실제 사례(auto-1787804703564): "luxury suit man detective city night urban"(7단어)는
+  // 0건이지만 앞 4단어 "luxury suit man detective"는 134건.
+  // → 앞 단어부터 살리며 단계적으로 단순화해 재시도한다 (핵심 주제어가 앞에 온다는 가정).
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  const variants: string[] = [];
+  for (const len of [words.length, 4, 3, 2]) {
+    if (len > words.length || len < 1) continue;
+    const v = words.slice(0, len).join(' ');
+    if (!variants.includes(v)) variants.push(v);
   }
+
+  for (const v of variants) {
+    log(`📸 Fetching cover image: "${v}"`);
+    const unsplashUrl = await fetchUnsplashImage(v);
+    if (unsplashUrl) {
+      log(`  ✓ Unsplash matched`);
+      return unsplashUrl;
+    }
+  }
+
   // picsum.photos는 무작위 사진(주제 무관)인 데다 2026-08 서비스 503으로
   // 발행 글 9건의 썸네일이 한꺼번에 깨진 적이 있다. 외부 의존 없는
   // 자체 호스팅 브랜드 커버로 폴백한다 (public/cover-default.png).
-  log(`  ⚠️  Unsplash returned no result — using default brand cover`);
+  log(`  ⚠️  Unsplash returned no result for all variants — using default brand cover`);
   return 'https://daily-memorylog.com/cover-default.png';
 }
 
