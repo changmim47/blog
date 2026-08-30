@@ -176,8 +176,11 @@ async function pickCoverImage(query: string): Promise<string> {
     log(`  ✓ Unsplash matched`);
     return unsplashUrl;
   }
-  log(`  ⚠️  Unsplash returned no result — falling back to picsum`);
-  return `https://picsum.photos/800/400?random=${Date.now()}`;
+  // picsum.photos는 무작위 사진(주제 무관)인 데다 2026-08 서비스 503으로
+  // 발행 글 9건의 썸네일이 한꺼번에 깨진 적이 있다. 외부 의존 없는
+  // 자체 호스팅 브랜드 커버로 폴백한다 (public/cover-default.png).
+  log(`  ⚠️  Unsplash returned no result — using default brand cover`);
+  return 'https://daily-memorylog.com/cover-default.png';
 }
 
 // =========================== Deduplication ===========================
