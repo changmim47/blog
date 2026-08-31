@@ -413,9 +413,21 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
   }
 
   const stripCitations = (s: string) => s.replace(/<\/?cite[^>]*>/g, '');
-  result.title = stripCitations(result.title);
-  result.summary = clampSummary(stripCitations(result.summary));
-  result.content_markdown = stripCitations(result.content_markdown);
+
+  // 모델이 긴 파라미터를 쓰다 도구 호출 직렬화 형식을 문자열 값 안에 흘리는 사례가 있었다
+  // (auto-1788138767334: 본문이 "</content_markdown> <parameter name=...>..."로 끝남).
+  // 첫 마커 이후를 전부 잘라내고, 잔여 직렬화 태그도 제거한다.
+  const stripToolArtifacts = (s: string) => {
+    let out = s;
+    const cut = out.indexOf('</content_markdown>');
+    if (cut >= 0) out = out.slice(0, cut);
+    out = out.replace(/<\/?(?:antml:)?(?:parameter|invoke|function_calls|content_markdown)[^>]*>/g, '');
+    return out.trimEnd();
+  };
+
+  result.title = stripCitations(stripToolArtifacts(result.title));
+  result.summary = clampSummary(stripCitations(stripToolArtifacts(result.summary)));
+  result.content_markdown = stripCitations(stripToolArtifacts(result.content_markdown));
   if (result.image_alt_suggestions) {
     result.image_alt_suggestions = result.image_alt_suggestions.map((i) => ({
       position: stripCitations(i.position),
