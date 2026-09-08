@@ -214,6 +214,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
               ))}
             </div>
           )}
+
+          {/* 모바일 관리자 메뉴 — 데스크톱에만 있던 Drafts/Runs/YouTube 진입로.
+              isAdmin은 클라이언트 인증 후에만 true가 되므로 정적 HTML(비로그인)에는 렌더되지 않는다. */}
+          {!isSearchOpen && isAdmin && (
+            <div className="md:hidden flex border-t border-slate-100/50 bg-slate-50/70">
+              {[
+                ['/drafts', 'Drafts'],
+                ['/admin/runs', 'Runs'],
+                ['/admin/youtube', 'YouTube'],
+              ].map(([href, label]) => (
+                <Link key={href} href={href} className={`flex-1 py-3 text-xs font-medium text-center uppercase tracking-widest ${pathname.includes(href) ? 'text-black bg-white' : 'text-slate-500'}`}>
+                  {label}
+                </Link>
+              ))}
+            </div>
+          )}
         </nav>
 
         <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full py-8 md:py-12">
