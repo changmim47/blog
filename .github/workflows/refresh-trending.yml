@@ -1,12 +1,9 @@
 name: Refresh Trending Topics
 
-# 매일 22:00 UTC = 07:00 KST. generate-post cron(08:00 KST)보다 1시간 전.
-# trending은 빠르게 묵으므로 매일 갱신해야 신선도 유지.
+# 2026-09-08부터 자동 실행은 generate-post.yml의 첫 스텝으로 옮겼다.
+# (이 파일의 cron이 7/23~9/7 원인불명으로 6주간 안 돌아 트렌딩이 7월 재고로만 돌아갔음.)
+# 여기는 수동 실행(테스트·긴급 갱신) 전용으로만 남긴다. 스케줄을 다시 넣으면 하루 두 번 돈다.
 on:
-  schedule:
-    - cron: '0 22 * * *'
-
-  # Actions 탭에서 수동 실행 가능
   workflow_dispatch:
 
 jobs:
