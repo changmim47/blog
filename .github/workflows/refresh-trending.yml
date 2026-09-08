@@ -34,3 +34,5 @@ jobs:
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           SUPABASE_ADMIN_EMAIL: ${{ secrets.SUPABASE_ADMIN_EMAIL }}
           SUPABASE_ADMIN_PASSWORD: ${{ secrets.SUPABASE_ADMIN_PASSWORD }}
+          # 네 기둥(과학/AI/경제/교육) 주제 필터용 — 없으면 그날 트렌딩 적재를 건너뜀
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
