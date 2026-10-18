@@ -159,11 +159,17 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
 
 // =================== Schemas (plain JSON Schema) ===================
 
+// 블로그 네 기둥. marketing.md / refresh-trending-topics.ts / video-analyze와 함께 관리할 것.
+export const PILLARS = ['과학', 'AI·테크', '경제·금융', '교육'] as const;
+export const OFF_PILLAR = '해당없음';
+export type Pillar = (typeof PILLARS)[number] | typeof OFF_PILLAR;
+
 export const MARKETING_SCHEMA = {
   type: 'object',
-  required: ['selected_keyword', 'search_intent', 'target_audience', 'angle', 'key_points', 'cover_image_query', 'reasoning'],
+  required: ['selected_keyword', 'pillar', 'search_intent', 'target_audience', 'angle', 'key_points', 'cover_image_query', 'reasoning'],
   properties: {
     selected_keyword: { type: 'string' },
+    pillar: { type: 'string', enum: [...PILLARS, OFF_PILLAR] },
     search_intent: { type: 'string' },
     target_audience: { type: 'string' },
     angle: { type: 'string' },
@@ -222,6 +228,7 @@ export const QA_SCHEMA = {
 
 export interface MarketingOutput {
   selected_keyword: string;
+  pillar: Pillar;
   search_intent: string;
   target_audience: string;
   angle: string;

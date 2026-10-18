@@ -6,6 +6,7 @@ import {
   MARKETING_SCHEMA,
   OPERATIONS_SCHEMA,
   QA_SCHEMA,
+  OFF_PILLAR,
   shouldApproveDespiteAmbiguity,
   type MarketingOutput,
   type OperationsOutput,
@@ -344,7 +345,10 @@ ${candidatesText}${exclusionText}`;
     webSearchMaxUses: 2, // 트렌드/최신성 가볍게 확인
     log,
   });
-  log(`  ✓ Marketing selected: "${result.selected_keyword}"`);
+  log(`  ✓ Marketing selected: "${result.selected_keyword}" (pillar: ${result.pillar})`);
+  if (result.pillar === OFF_PILLAR) {
+    console.warn(`  ⚠️  Marketing picked an off-pillar keyword from autocomplete candidates`);
+  }
   log(`  ✓ Angle: ${result.angle.slice(0, 100)}${result.angle.length > 100 ? '...' : ''}`);
   return result;
 }
@@ -573,14 +577,44 @@ async function main() {
     }
   }
 
-  let marketing: MarketingOutput;
+  let marketing: MarketingOutput | null = null;
   const pool: SeedSuggestions[] = [];
   const exclusion: ExclusionList = { titles: [], keywords: [] };
 
   if (fixedKeyword) {
     // 고정 키워드 모드 (manual 또는 trending) — autocomplete/dedup 건너뛰고 Marketing이 브리핑만 작성
-    marketing = await runMarketingWithFixedKeyword(fixedKeyword, fixedHint);
-  } else {
+    const brief = await runMarketingWithFixedKeyword(fixedKeyword, fixedHint);
+    log(`  ✓ Pillar: ${brief.pillar}`);
+
+    // 고정 키워드는 후보 선정 단계를 건너뛰므로 네 기둥 회피 규칙이 적용되지 않는다.
+    // 트렌딩 분류(refresh-trending)를 통과한 영상이라도 Gemini 제안 제목이 기둥 밖으로
+    // 새는 경우가 있어, 브리핑 단계에서 한 번 더 걸러 autocomplete로 넘긴다.
+    if (brief.pillar === OFF_PILLAR) {
+      const source = manualQueueId !== null ? 'manual queue' : 'trending topic';
+      log(`🚫 "${fixedKeyword}" is outside the four pillars (${source}) — skipping, falling back to autocomplete`);
+      await recordFailure(`Off-pillar fixed keyword skipped (${source})`, fixedKeyword, null, {
+        marketing: brief,
+        manualQueueId,
+        trendingTopicId,
+      });
+      if (manualQueueId !== null) {
+        try { await supabase.rpc('mark_manual_keyword_failed', { queue_id: manualQueueId }); }
+        catch (e) { console.warn('mark_manual_keyword_failed failed:', e); }
+        manualQueueId = null;
+        currentManualQueueId = null;
+      }
+      if (trendingTopicId !== null) {
+        try { await supabase.rpc('mark_trending_topic_failed', { topic_id: trendingTopicId }); }
+        catch (e) { console.warn('mark_trending_topic_failed failed:', e); }
+        trendingTopicId = null;
+        currentTrendingTopicId = null;
+      }
+    } else {
+      marketing = brief;
+    }
+  }
+
+  if (!marketing) {
     // 2. Autocomplete fallback (기존 흐름)
     const fetchedPool = await gatherSuggestions();
     pool.push(...fetchedPool);
