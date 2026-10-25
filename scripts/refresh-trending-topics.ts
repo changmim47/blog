@@ -45,7 +45,7 @@ const TRENDING_QUERIES: Record<keyof typeof SEED_PILLARS, string[]> = {
   교육: ['공부법', '입시'],
 };
 // 50개 제목 분류는 기계적인 작업이라 저렴한 모델로 충분.
-const CLASSIFY_MODEL = process.env.ANTHROPIC_MODEL_CLASSIFY || 'claude-haiku-4-5-20251001';
+const CLASSIFY_MODEL = process.env.ANTHROPIC_MODEL_CLASSIFY || 'claude-haiku-5-5';
 
 interface AnalyzedVideo {
   id: string;
@@ -76,6 +76,8 @@ async function filterByPillar(videos: AnalyzedVideo[], pillar: string): Promise<
     const res = await client.messages.create({
       model: CLASSIFY_MODEL,
       max_tokens: 1024,
+      // Haiku 5.5 기본 effort는 medium — 제목 분류라 low로 충분.
+      output_config: { effort: 'low' },
       tools: [
         {
           name: 'submit_selection',

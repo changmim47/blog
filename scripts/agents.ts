@@ -114,7 +114,7 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
   ];
   if (webSearchMaxUses && webSearchMaxUses > 0) {
     tools.push({
-      type: 'web_search_20250305',
+      type: 'web_search_20260209',
       name: 'web_search',
       max_uses: webSearchMaxUses,
     } as unknown as Anthropic.Messages.ToolUnion);
