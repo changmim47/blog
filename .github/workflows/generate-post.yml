@@ -28,7 +28,7 @@ jobs:
         run: npm ci
 
       # 트렌딩 갱신을 글 생성 직전에 같은 잡에서 돌린다.
-      # 별도 cron(refresh-trending.yml)이 2026-07-23~09-07 원인불명으로 6주간 안 돌아
+      # 별도 cron(refresh-trending.yml, 이후 삭제)이 2026-07-23~09-07 원인불명으로 6주간 안 돌아
       # 7월 재고만 소진되던 사고가 있었다. 한 워크플로로 묶으면 그 의존이 사라진다.
       # 실패해도 글 생성은 계속 — generate-post의 autocomplete fallback이 커버한다.
       - name: Refresh trending topics
