@@ -11,6 +11,7 @@ import {
   type MarketingOutput,
   type OperationsOutput,
   type QaOutput,
+  type Source,
 } from './agents';
 import { TelegramReporter } from './telegram';
 
@@ -34,6 +35,8 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !ADMIN_EMAIL || !ADMIN_PASSWORD || !ANTHRO
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
+const startedAt = Date.now();
+const elapsed = (from: number) => `${((Date.now() - from) / 1000).toFixed(1)}s`;
 
 const AUTOCOMPLETE_DELAY_MS = 100;
 // 30일이면 Codex 사용법이 31일 만에 다시 나왔다(05-10 → 06-10). 180은 출발값 — 운영하며 조정.
@@ -331,6 +334,7 @@ cover_image_query, reasoning)를 블로그 컨셉에 맞게 작성하세요.
 selected_keyword는 위 키워드 그대로 (변형 금지). 표기 규칙(영어 첫 글자 대문자)만 적용.`;
 
   log(`🎯 Marketing agent — adapting brief for manual keyword "${fixedKeyword}"...`);
+  const t0 = Date.now();
   const result = await callAgent<MarketingOutput>({
     agentName: 'marketing',
     userPrompt,
@@ -340,6 +344,7 @@ selected_keyword는 위 키워드 그대로 (변형 금지). 표기 규칙(영�
     webSearchMaxUses: 2,
     log,
   });
+  log(`  ⏱️  Marketing ${elapsed(t0)} (total ${elapsed(startedAt)})`);
   // 안전장치: Marketing이 키워드를 약간 변형해도 무시하고 강제로 원본 사용
   result.selected_keyword = fixedKeyword;
   return result;
@@ -373,6 +378,7 @@ ${exclusion.keywords.slice(0, 30).map((k, i) => `${i + 1}. ${k}`).join('\n') || 
 ${candidatesText}${exclusionText}`;
 
   log('🎯 Marketing agent — selecting topic...');
+  const t0 = Date.now();
   const result = await callAgent<MarketingOutput>({
     agentName: 'marketing',
     userPrompt,
@@ -382,13 +388,23 @@ ${candidatesText}${exclusionText}`;
     webSearchMaxUses: 2, // 트렌드/최신성 가볍게 확인
     log,
   });
+  log(`  ⏱️  Marketing ${elapsed(t0)} (total ${elapsed(startedAt)})`);
   log(`  ✓ Marketing selected: "${result.selected_keyword}" (pillar: ${result.pillar})`);
   log(`  ✓ Angle: ${result.angle.slice(0, 100)}${result.angle.length > 100 ? '...' : ''}`);
   return result;
 }
 
+interface TrendingVideo {
+  videoId: string;
+  title: string;
+  channel: string | null;
+}
+
+// sources는 main이 넘긴 배열에 callAgent가 web_search 출처를 누적한다 (재작성 호출까지 합쳐 최대 5개).
 async function runOperations(
   marketing: MarketingOutput,
+  video: TrendingVideo | null,
+  sources: Source[],
   revision?: { previousDraft: OperationsOutput; qaFeedback: QaOutput }
 ): Promise<OperationsOutput> {
   const briefingText = `[마케팅팀 브리핑]
@@ -398,7 +414,11 @@ async function runOperations(
 - angle: ${marketing.angle}
 - key_points:
 ${marketing.key_points.map((p, i) => `  ${i + 1}. ${p}`).join('\n')}
-- long_tail_variations: ${marketing.long_tail_variations?.join(', ') || '(없음)'}`;
+- long_tail_variations: ${marketing.long_tail_variations?.join(', ') || '(없음)'}${video ? `
+
+[참고 영상]
+- 채널: ${video.channel ?? '(알 수 없음)'}
+- 제목: ${video.title}` : ''}`;
 
   const revisionText = revision
     ? `
@@ -425,6 +445,7 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     log('✍️  Operations agent — drafting...');
   }
 
+  const t0 = Date.now();
   const result = await callAgent<OperationsOutput>({
     agentName: 'operations',
     userPrompt,
@@ -432,8 +453,10 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     toolDescription: '완성된 블로그 초안을 제출',
     inputSchema: OPERATIONS_SCHEMA,
     webSearchMaxUses: 5, // 본문 작성 — 최신 가격/모델/정책 확인 위해 충분히
+    sources,
     log,
   });
+  log(`  ⏱️  Operations ${elapsed(t0)} (total ${elapsed(startedAt)})`);
 
   // 스키마는 tags를 string[]로 강제하지만 Claude가 가끔 콤마 문자열로 흘려보냄 → 배열로 강제 변환.
   // 그대로 두면 후속 단계의 tags.join / tags.length가 throw하고 main() catch까지 올라가 시스템 오류 알림이 감.
@@ -445,10 +468,6 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
     }
   }
   result.tags = result.tags.map((t) => String(t).trim()).filter(Boolean);
-
-  if (result.image_alt_suggestions && !Array.isArray(result.image_alt_suggestions)) {
-    result.image_alt_suggestions = [];
-  }
 
   const stripCitations = (s: string) => s.replace(/<\/?cite[^>]*>/g, '');
 
@@ -466,17 +485,9 @@ QA 종합 코멘트: ${revision.qaFeedback.overall_comment}
   result.title = stripCitations(stripToolArtifacts(result.title));
   result.summary = clampSummary(stripCitations(stripToolArtifacts(result.summary)));
   result.content_markdown = stripCitations(stripToolArtifacts(result.content_markdown));
-  if (result.image_alt_suggestions) {
-    result.image_alt_suggestions = result.image_alt_suggestions.map((i) => ({
-      position: stripCitations(i.position),
-      alt_text: stripCitations(i.alt_text),
-    }));
-  }
-  if (result.technical_notes) {
-    result.technical_notes = stripCitations(result.technical_notes);
-  }
   log(`  ✓ Operations title: ${result.title}`);
-  log(`  ✓ Body: ${result.content_markdown.length} chars, ${result.tags.length} tags`);
+  // 분량은 측정·로그만 한다(재작성 사유 아님). 공백 제외 수에는 마크다운 기호가 포함된다.
+  log(`  ✓ Body: ${result.content_markdown.length} chars (${result.content_markdown.replace(/\s/g, '').length} without spaces), ${result.tags.length} tags, ${sources.length} sources`);
   return result;
 }
 
@@ -497,19 +508,20 @@ function clampSummary(summary: string, max = 150): string {
   return (lastSpace >= 60 ? head.slice(0, lastSpace) : head.slice(0, max - 1)).trim() + '…';
 }
 
-async function runQa(operations: OperationsOutput): Promise<QaOutput> {
-  const userPrompt = `${buildCurrentContext()}[검토 대상 초안]
+async function runQa(operations: OperationsOutput, marketing: MarketingOutput): Promise<QaOutput> {
+  const userPrompt = `${buildCurrentContext()}[선정 키워드] ${marketing.selected_keyword}
+[검색 의도] ${marketing.search_intent}
+
+[검토 대상 초안]
 제목: ${operations.title}
 요약: ${operations.summary}
 태그: ${operations.tags.join(', ')}
 
 본문:
-${operations.content_markdown}
-
-이미지 제안: ${JSON.stringify(operations.image_alt_suggestions ?? [])}
-기술 메모: ${operations.technical_notes ?? '(없음)'}`;
+${operations.content_markdown}`;
 
   log('🔍 QA agent — reviewing draft...');
+  const t0 = Date.now();
   const result = await callAgent<QaOutput>({
     agentName: 'qa',
     userPrompt,
@@ -518,6 +530,13 @@ ${operations.content_markdown}
     inputSchema: QA_SCHEMA,
     log,
   });
+  log(`  ⏱️  QA ${elapsed(t0)} (total ${elapsed(startedAt)})`);
+  // level은 자유 문자열로 올 수 있다("Major", "critical") → 승인 판정·major/minor 집계가 모두 'major'/'minor' 완전일치라 여기서 맞춘다.
+  result.issues ??= [];
+  for (const i of result.issues) {
+    const level = String(i.level).toLowerCase();
+    i.level = level === 'major' || level === 'critical' ? 'major' : 'minor';
+  }
   log(`  ✓ QA verdict: ${result.approved ? 'APPROVED' : 'REJECTED'} (${result.severity}, ${result.issues.length} issues)`);
   if (result.overall_comment) {
     log(`  ✓ Comment: ${result.overall_comment.slice(0, 150)}${result.overall_comment.length > 150 ? '...' : ''}`);
@@ -556,6 +575,7 @@ async function main() {
   let trendingTopicId: number | null = null;
   let fixedKeyword: string | null = null;
   let fixedHint: string | null = null;
+  let trendingVideo: TrendingVideo | null = null;
 
   // 0. Manual queue (관리자가 /admin/youtube에서 직접 추가한 키워드)
   try {
@@ -582,6 +602,7 @@ async function main() {
         currentTrendingTopicId = trendingTopicId;
         const videoId = topics[0].video_id;
         const videoTitle = topics[0].title;
+        trendingVideo = { videoId, title: videoTitle, channel: topics[0].channel_title ?? null };
         log(`🎬 Trending topic claimed: "${videoTitle}" (videoId=${videoId}, topic id=${trendingTopicId})`);
 
         // 영상 분석 → blog_suggestions 받기
@@ -707,8 +728,11 @@ async function main() {
 
   // 3. Operations + QA loop
   const agentTrace: Record<string, unknown> = { marketing };
+  // 트렌딩이 중간에 취소되면 trendingTopicId가 null이 되므로 그때는 영상 출처를 쓰지 않는다.
+  const video = trendingTopicId !== null ? trendingVideo : null;
+  const sources: Source[] = [];
 
-  let draft = await runOperations(marketing);
+  let draft = await runOperations(marketing, video, sources);
   agentTrace.operations_v1 = draft;
   await reporter.update({
     operations: {
@@ -720,7 +744,7 @@ async function main() {
     qa: { status: 'in-progress', attempt: 1 },
   });
 
-  let qa = await runQa(draft);
+  let qa = await runQa(draft, marketing);
   agentTrace.qa_v1 = qa;
 
   const revisionHistory: { qaSummary: string; majorCount: number }[] = [];
@@ -751,7 +775,7 @@ async function main() {
     });
 
     log(`📝 Revision ${revisionCount}/${MAX_REVISIONS} requested by QA`);
-    draft = await runOperations(marketing, { previousDraft: draft, qaFeedback: qa });
+    draft = await runOperations(marketing, video, sources, { previousDraft: draft, qaFeedback: qa });
     agentTrace[`operations_v${revisionCount + 1}`] = draft;
 
     await reporter.update({
@@ -764,7 +788,7 @@ async function main() {
       qa: { status: 'in-progress', attempt: revisionCount + 1 },
     });
 
-    qa = await runQa(draft);
+    qa = await runQa(draft, marketing);
     agentTrace[`qa_v${revisionCount + 1}`] = qa;
   }
 
@@ -787,7 +811,7 @@ async function main() {
 
   // 4. If finally rejected, record failure and notify
   if (!finalApproved) {
-    log(`❌ QA rejected after ${MAX_REVISIONS} revisions. Not saving draft.`);
+    log(`❌ QA rejected after ${MAX_REVISIONS} revisions. Not saving draft. (total ${elapsed(startedAt)})`);
     await recordFailure(
       `QA rejected after ${MAX_REVISIONS} revisions: ${qa.overall_comment}`,
       marketing.selected_keyword,
@@ -825,13 +849,20 @@ async function main() {
   // 5. Cover image (Unsplash → fallback picsum)
   const coverImage = await pickCoverImage(marketing.cover_image_query);
 
-  // 6. Insert approved draft
+  // 6. Insert approved draft — 글 끝에 관련 자료(영상 + web_search 출처)를 붙인다. QA는 이 목록 없이 본문만 검토했다.
+  // 검색 결과 상위가 섞여 본문이 실제로 인용했다는 보장이 없으므로 "참고 자료"가 아니라 "관련 자료"로 표기.
+  const linkText = (t: string) => t.replace(/[[\]]/g, '');
+  const linkUrl = (u: string) => u.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/ /g, '%20');
+  const references = [
+    ...(video ? [`- [${linkText(video.title)}${video.channel ? ` (${linkText(video.channel)})` : ''}](https://www.youtube.com/watch?v=${video.videoId})`] : []),
+    ...sources.map((src) => `- [${linkText(src.title)}](${linkUrl(src.url)})`),
+  ];
   const postId = `auto-${Date.now()}`;
   const post = {
     id: postId,
     type: 'blog',
     title: draft.title,
-    content: draft.content_markdown,
+    content: references.length > 0 ? `${draft.content_markdown}\n\n## 관련 자료\n${references.join('\n')}` : draft.content_markdown,
     summary: draft.summary,
     tags: draft.tags,
     createdAt: Date.now(),
@@ -882,7 +913,7 @@ async function main() {
   }
 
   log('');
-  log(`✅ Done. Keyword: "${marketing.selected_keyword}". Check /drafts and /admin/runs.`);
+  log(`✅ Done. Keyword: "${marketing.selected_keyword}". ${references.length} references. Total ${elapsed(startedAt)}. Check /drafts and /admin/runs.`);
 
   await reporter.update({
     final: {

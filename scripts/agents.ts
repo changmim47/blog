@@ -15,13 +15,20 @@ const ANTHROPIC_MODEL_QA = process.env.ANTHROPIC_MODEL_QA || 'claude-sonnet-4-6'
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 const MAX_ATTEMPTS = 4;
+// Ops 1회 추정 1.5~3분. 막힌 요청은 5분에 끊고 아래 수동 재시도로 한 번 더 보낸다 (잡 timeout 20분).
+const REQUEST_TIMEOUT_MS = 5 * 60_000;
+// 서버 도구(web_search) 루프가 pause_turn으로 끊기면 이어 받는 최대 횟수
+const MAX_PAUSE_CONTINUES = 2;
+// content 끝 "관련 자료"에 붙일 web_search 출처 최대 개수
+const MAX_SOURCES = 5;
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!_client) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY missing');
-    _client = new Anthropic({ apiKey });
+    // SDK 기본 재시도(2회)는 아래 수동 재시도와 겹치므로 끈다.
+    _client = new Anthropic({ apiKey, maxRetries: 0, timeout: REQUEST_TIMEOUT_MS });
   }
   return _client;
 }
@@ -57,11 +64,42 @@ interface CallAgentOptions {
    * 비용: $10/1000 searches ≈ $0.01/search.
    */
   webSearchMaxUses?: number;
+  /** 주면 web_search 인용·결과 URL을 여기에 모은다 (중복 제거, 최대 MAX_SOURCES개). 여러 호출에 같은 배열을 넘기면 누적. */
+  sources?: Source[];
   log?: (msg: string) => void;
 }
 
+export interface Source {
+  title: string;
+  url: string;
+}
+
+/**
+ * 응답 블록에서 출처를 모은다. 실제 인용된 것(text 블록 citations)을 먼저,
+ * 그다음 검색 결과를 검색마다 1위부터 번갈아 넣는다 (첫 검색 결과로만 칸이 차지 않게).
+ */
+export function collectSources(blocks: Anthropic.Messages.ContentBlock[], sources: Source[]): void {
+  const add = (title: string | null, url: string) => {
+    if (sources.length >= MAX_SOURCES || sources.some((s) => s.url === url)) return;
+    sources.push({ title: title || url, url });
+  };
+  for (const b of blocks) {
+    if (b.type !== 'text') continue;
+    for (const c of b.citations ?? []) {
+      if (c.type === 'web_search_result_location') add(c.title, c.url);
+    }
+  }
+  const resultLists = blocks.flatMap((b) =>
+    b.type === 'web_search_tool_result' && Array.isArray(b.content) ? [b.content] : []
+  );
+  const longest = Math.max(0, ...resultLists.map((l) => l.length));
+  for (let i = 0; i < longest; i++) {
+    for (const l of resultLists) if (i < l.length) add(l[i].title, l[i].url);
+  }
+}
+
 export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T> {
-  const { agentName, userPrompt, toolName, toolDescription, inputSchema, webSearchMaxUses, log } = opts;
+  const { agentName, userPrompt, toolName, toolDescription, inputSchema, webSearchMaxUses, sources, log } = opts;
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS[agentName] ?? 4096;
   const systemInstruction = await loadAgentPrompt(agentName);
   const client = getClient();
@@ -82,6 +120,7 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
     } as unknown as Anthropic.Messages.ToolUnion);
   }
 
+  const messages: Anthropic.Messages.MessageParam[] = [{ role: 'user', content: userPrompt }];
   const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
     model: agentName === 'qa' ? ANTHROPIC_MODEL_QA : ANTHROPIC_MODEL,
     max_tokens: maxTokens,
@@ -90,46 +129,62 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
     // web_search 활성 시 'auto'로 두어야 모델이 검색 후 custom tool 호출 가능.
     // 비활성 시 강제 호출로 안정성 확보.
     tool_choice: webSearchMaxUses ? { type: 'auto' } : { type: 'tool', name: toolName },
-    messages: [{ role: 'user', content: userPrompt }],
+    messages,
   };
 
   let response: Anthropic.Messages.Message | undefined;
-  let lastError: unknown;
+  let searchCount = 0;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      response = await client.messages.create(requestParams);
-      break;
-    } catch (e) {
-      lastError = e;
-      const errStr = e instanceof Error ? e.message : String(e);
-      // Anthropic 재시도 가능 에러: 429 rate_limit, 529 overloaded, 5xx server errors
-      const isRetryable =
-        errStr.includes('429') ||
-        errStr.includes('rate_limit') ||
-        errStr.includes('529') ||
-        errStr.includes('overloaded') ||
-        errStr.includes('Overloaded') ||
-        errStr.includes('500') ||
-        errStr.includes('502') ||
-        errStr.includes('503') ||
-        errStr.includes('504');
+  // pause_turn이면 받은 내용을 assistant 턴으로 붙여 같은 요청을 이어 보낸다.
+  for (let turn = 0; ; turn++) {
+    response = undefined;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        response = await client.messages.create(requestParams);
+        break;
+      } catch (e) {
+        lastError = e;
+        const errStr = e instanceof Error ? e.message : String(e);
+        // Anthropic 재시도 가능 에러: 429 rate_limit, 529 overloaded, 5xx server errors
+        const isRetryable =
+          errStr.includes('429') ||
+          errStr.includes('rate_limit') ||
+          errStr.includes('529') ||
+          errStr.includes('overloaded') ||
+          errStr.includes('Overloaded') ||
+          errStr.includes('500') ||
+          errStr.includes('502') ||
+          errStr.includes('503') ||
+          errStr.includes('504') ||
+          errStr.includes('timed out');
 
-      if (!isRetryable || attempt === MAX_ATTEMPTS) throw e;
+        if (!isRetryable || attempt === MAX_ATTEMPTS) throw e;
 
-      const delay = RETRY_DELAYS_MS[attempt - 1] ?? 30_000;
-      log?.(`  ⚠️  [${agentName}] attempt ${attempt}/${MAX_ATTEMPTS} failed: ${errStr.slice(0, 120)}`);
-      log?.(`     retrying in ${Math.round(delay / 1000)}s...`);
-      await new Promise((r) => setTimeout(r, delay));
+        const delay = RETRY_DELAYS_MS[attempt - 1] ?? 30_000;
+        log?.(`  ⚠️  [${agentName}] attempt ${attempt}/${MAX_ATTEMPTS} failed: ${errStr.slice(0, 120)}`);
+        log?.(`     retrying in ${Math.round(delay / 1000)}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
+    if (!response) throw lastError ?? new Error(`[${agentName}] call failed`);
+
+    searchCount += response.content.filter((b) => b.type === 'server_tool_use').length;
+    if (sources) collectSources(response.content, sources);
+
+    if (response.stop_reason !== 'pause_turn') break;
+    if (turn === MAX_PAUSE_CONTINUES) {
+      throw new Error(`[${agentName}] still pause_turn after ${MAX_PAUSE_CONTINUES} continuations`);
+    }
+    log?.(`  ⏸️  [${agentName}] pause_turn — continuing (${turn + 1}/${MAX_PAUSE_CONTINUES})`);
+    messages.push({ role: 'assistant', content: response.content });
   }
-  if (!response) throw lastError ?? new Error(`[${agentName}] call failed`);
 
   // stop_reason 검증
   if (response.stop_reason === 'max_tokens') {
     throw new Error(`[${agentName}] response truncated (stop_reason=max_tokens). Increase maxTokens.`);
   }
-  if (response.stop_reason !== 'tool_use' && response.stop_reason !== 'end_turn' && response.stop_reason !== 'pause_turn') {
+  if (response.stop_reason !== 'tool_use' && response.stop_reason !== 'end_turn') {
     throw new Error(`[${agentName}] unexpected stop_reason=${response.stop_reason}`);
   }
 
@@ -140,7 +195,6 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
   );
   if (!toolUseBlock || toolUseBlock.type !== 'tool_use') {
     // 검색 횟수 로깅 (디버깅용)
-    const searchCount = response.content.filter((b) => b.type === 'server_tool_use').length;
     if (searchCount > 0) log?.(`  ℹ️  [${agentName}] performed ${searchCount} web searches`);
 
     const textBlocks = response.content.filter((b) => b.type === 'text');
@@ -151,7 +205,6 @@ export async function callAgent<T = unknown>(opts: CallAgentOptions): Promise<T>
   }
 
   // 디버깅: 웹 검색 사용 횟수 로깅
-  const searchCount = response.content.filter((b) => b.type === 'server_tool_use').length;
   if (searchCount > 0) log?.(`  🌐 [${agentName}] used ${searchCount} web search(es)`);
 
   return toolUseBlock.input as T;
@@ -188,17 +241,6 @@ export const OPERATIONS_SCHEMA = {
     summary: { type: 'string' },
     tags: { type: 'array', items: { type: 'string' } },
     content_markdown: { type: 'string' },
-    image_alt_suggestions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          position: { type: 'string' },
-          alt_text: { type: 'string' },
-        },
-      },
-    },
-    technical_notes: { type: 'string' },
   },
 };
 
@@ -214,7 +256,7 @@ export const QA_SCHEMA = {
         type: 'object',
         properties: {
           category: { type: 'string' },
-          level: { type: 'string' },
+          level: { type: 'string', enum: ['minor', 'major'] },
           description: { type: 'string' },
           suggestion: { type: 'string' },
         },
@@ -243,8 +285,6 @@ export interface OperationsOutput {
   summary: string;
   tags: string[];
   content_markdown: string;
-  image_alt_suggestions?: { position: string; alt_text: string }[];
-  technical_notes?: string;
 }
 
 export interface QaIssue {
@@ -268,9 +308,7 @@ export interface QaOutput {
  * 시스템 오류로 인한 false rejection 방지.
  */
 export function shouldApproveDespiteAmbiguity(qa: QaOutput): boolean {
-  if (qa.approved === true) return true;
-  if (!qa.issues || qa.issues.length === 0) return true;
-  const hasMajor = qa.issues.some((i) => i.level === 'major');
-  if (!hasMajor) return true;
-  return false;
+  // major가 있으면 approved=true여도 거절 — 체험 날조·사실 오류가 승인 플래그로 새지 않게.
+  if (qa.issues?.some((i) => i.level === 'major')) return false;
+  return true;
 }
