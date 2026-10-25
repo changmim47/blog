@@ -41,7 +41,9 @@ const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCan
   const [likes, setLikes] = useState(0);
   const [createdAt, setCreatedAt] = useState(Date.now());
   const [published, setPublished] = useState(true);
-  
+  // 자동 생성 글은 검색 설명용 summary를 따로 쓴다 — 편집 저장 때 본문 앞 150자로 덮어쓰지 않게 보존
+  const [summary, setSummary] = useState('');
+
   const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(!!isEdit);
@@ -67,6 +69,7 @@ const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCan
                   setLikes(found.likes || 0);
                   setCreatedAt(found.createdAt);
                   setPublished(found.published !== false);
+                  setSummary(found.summary || '');
               }
               setIsFetching(false);
           });
@@ -81,6 +84,7 @@ const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCan
         setLikes(initialPost.likes || 0);
         setCreatedAt(initialPost.createdAt);
         setPublished(initialPost.published !== false);
+        setSummary(initialPost.summary || '');
       }
   }, [isEdit, id, initialPost]);
 
@@ -223,7 +227,7 @@ const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCan
         .replace(/\n+/g, ' ')           // Replace newlines with space
         .trim();
 
-    const summary = cleanContent.substring(0, 150) + (cleanContent.length > 150 ? "..." : "");
+    const fallbackSummary = cleanContent.substring(0, 150) + (cleanContent.length > 150 ? "..." : "");
     const finalCoverImage = coverImage || `https://picsum.photos/800/400?random=${Date.now()}`;
 
     const newPost: BlogPost = {
@@ -231,7 +235,7 @@ const Editor: React.FC<EditorProps> = ({ initialPost, defaultType, onSave, onCan
       type: postType,
       title,
       content,
-      summary,
+      summary: summary.trim() || fallbackSummary,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
       createdAt: createdAt,
       coverImage: finalCoverImage,

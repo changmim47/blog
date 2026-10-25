@@ -16,8 +16,8 @@ import { useIsAdmin } from './AdminContext';
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h2 className="text-3xl font-bold text-slate-800 mt-8 mb-4">{children}</h2>,
-  h2: ({ children }) => <h3 className="text-2xl font-bold text-slate-800 mt-6 mb-3">{children}</h3>,
-  h3: ({ children }) => <h4 className="text-xl font-bold text-slate-800 mt-5 mb-2">{children}</h4>,
+  h2: ({ children }) => <h2 className="text-2xl font-bold text-slate-800 mt-6 mb-3">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-xl font-bold text-slate-800 mt-5 mb-2">{children}</h3>,
   p: ({ children }) => <p className="mb-4 leading-loose">{children}</p>,
   blockquote: ({ children }) => (
     <blockquote className="border-l-4 border-indigo-300 pl-4 italic text-slate-600 my-4 bg-slate-50 py-2 pr-2">
