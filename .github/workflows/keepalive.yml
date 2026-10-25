@@ -1,0 +1,31 @@
+name: Keepalive
+
+# 공개 저장소는 60일간 커밋이 없으면 GitHub이 예약(schedule) 워크플로를 자동으로 끈다.
+# (7/22 무렵 generate-post가 이걸로 멈췄다.)
+# 매달 워크플로 enable API를 호출해 비활동 타이머를 초기화한다. 커밋은 만들지 않는다.
+# 예약 워크플로를 새로 추가하면 아래 WORKFLOWS에도 넣을 것.
+
+on:
+  # 매달 1일 KST 오전 9시 (= UTC 00:00)
+  schedule:
+    - cron: '0 0 1 * *'
+
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Re-enable scheduled workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOWS: generate-post.yml keepalive.yml
+        run: |
+          for wf in $WORKFLOWS; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable"
+            echo "$wf enabled"
+          done
