@@ -1,6 +1,6 @@
 import { config as dotenvConfig } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { SEED_KEYWORDS } from './seed-keywords';
+import { SEED_PILLARS, pillarOrderForToday } from './seed-keywords';
 import {
   callAgent,
   MARKETING_SCHEMA,
@@ -36,8 +36,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const AUTOCOMPLETE_DELAY_MS = 100;
-const DEDUP_LOOKBACK_DAYS = 30;
+// 30일이면 Codex 사용법이 31일 만에 다시 나왔다(05-10 → 06-10). 180은 출발값 — 운영하며 조정.
+const DEDUP_LOOKBACK_DAYS = 180;
 const MAX_REVISIONS = 2;
+// 자동완성 경로에서 Marketing이 기둥 밖이나 오늘 기둥이 아닌 키워드를 고르면 재선정하는 횟수. 생성 잡이 10분 timeout이라 늘리지 말 것.
+const OFF_PILLAR_RETRIES = 2;
 
 // 모든 에이전트 호출에 prepend되는 현재 시점 정보.
 // LLM은 학습 시점을 기본 가정하므로 명시적으로 주입해야 작년 데이터를 최신으로 오인하지 않음.
@@ -109,11 +112,11 @@ async function fetchAutocomplete(query: string): Promise<string[]> {
 }
 
 // autocomplete fallback 단계에서 사용. trending_topics가 비었을 때만 도달.
-async function gatherSuggestions(): Promise<SeedSuggestions[]> {
-  log(`Gathering autocomplete suggestions for ${SEED_KEYWORDS.length} seeds...`);
+async function gatherSuggestions(seeds: string[]): Promise<SeedSuggestions[]> {
+  log(`Gathering autocomplete suggestions for ${seeds.length} seeds...`);
   const result: SeedSuggestions[] = [];
   let totalCount = 0;
-  for (const seed of SEED_KEYWORDS) {
+  for (const seed of seeds) {
     const suggestions = await fetchAutocomplete(seed);
     result.push({ seed, suggestions });
     totalCount += suggestions.length;
@@ -140,6 +143,24 @@ function buildCandidates(pool: SeedSuggestions[]): Candidate[] {
     }
   }
   return candidates;
+}
+
+// 그룹들에서 앞에서부터 하나씩 번갈아 뽑는다. 짧은 그룹이 바닥나면 남은 그룹끼리 계속 돈다.
+function interleave<T>(groups: T[][]): T[] {
+  const out: T[] = [];
+  const longest = Math.max(0, ...groups.map((g) => g.length));
+  for (let i = 0; i < longest; i++) {
+    for (const g of groups) if (i < g.length) out.push(g[i]);
+  }
+  return out;
+}
+
+// Marketing에 넘길 후보를 시드끼리 번갈아 고른다.
+// 후보는 시드 순서대로 쌓여서 앞에서 자르면 첫 시드 3~4개로 50칸이 다 찬다(시드당 후보 ~14개).
+// 시드별로는 자동완성 상위 제안이 먼저 들어간다. 섞지 않으므로 같은 후보면 결과도 같다(디버그용).
+function sampleBySeed(candidates: Candidate[], limit: number): Candidate[] {
+  const seeds = [...new Set(candidates.map((c) => c.seed))];
+  return interleave(seeds.map((seed) => candidates.filter((c) => c.seed === seed))).slice(0, limit);
 }
 
 // =========================== Unsplash Cover Image ===========================
@@ -216,7 +237,7 @@ async function fetchRecentTopics(daysBack: number): Promise<ExclusionList> {
     .select('title')
     .gte('createdAt', sinceMs)
     .order('createdAt', { ascending: false })
-    .limit(100);
+    .limit(300); // 매일 생성 기준 180일 ≈ 180건 — 100이면 창 뒤쪽이 잘린다
 
   const { data: runs } = await supabase
     .from('generation_runs')
@@ -224,7 +245,7 @@ async function fetchRecentTopics(daysBack: number): Promise<ExclusionList> {
     .eq('status', 'success')
     .gte('created_at', since.toISOString())
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(300);
 
   return {
     titles: (posts ?? []).map((p) => p.title).filter((t): t is string => !!t),
@@ -234,25 +255,38 @@ async function fetchRecentTopics(daysBack: number): Promise<ExclusionList> {
 
 const normalizeForCompare = (s: string) => s.toLowerCase().replace(/\s+/g, '');
 
-function filterDuplicateCandidates(
-  candidates: Candidate[],
-  exclusion: ExclusionList
-): Candidate[] {
-  const recentKeywordsNorm = new Set(exclusion.keywords.map(normalizeForCompare));
-  const recentTitlesNorm = exclusion.titles.map(normalizeForCompare);
+// 자동완성 후보와 고정 키워드(수동 큐·트렌딩)가 같은 검사를 쓴다.
+function isDuplicateKeyword(keyword: string, exclusion: ExclusionList): boolean {
+  const candNorm = normalizeForCompare(keyword);
+  for (const k of exclusion.keywords) {
+    const recentNorm = normalizeForCompare(k);
+    if (recentNorm === candNorm) return true;
+    if (recentNorm.length < 6) continue;
+    if (candNorm.includes(recentNorm) || recentNorm.includes(candNorm)) return true;
+  }
+  for (const t of exclusion.titles) {
+    if (candNorm.length >= 6 && normalizeForCompare(t).includes(candNorm)) return true;
+  }
+  return false;
+}
 
-  return candidates.filter((c) => {
-    const candNorm = normalizeForCompare(c.keyword);
-    if (recentKeywordsNorm.has(candNorm)) return false;
-    for (const recentNorm of recentKeywordsNorm) {
-      if (recentNorm.length < 6) continue;
-      if (candNorm.includes(recentNorm) || recentNorm.includes(candNorm)) return false;
-    }
-    for (const titleNorm of recentTitlesNorm) {
-      if (candNorm.length >= 6 && titleNorm.includes(candNorm)) return false;
-    }
-    return true;
-  });
+// 기둥 순서대로 그 기둥 시드만 자동완성을 돌려, 중복을 거르고 후보가 남는 첫 기둥을 쓴다.
+// 오늘 기둥 후보가 전부 중복이면 그날 글이 사라지지 않게 다음 기둥으로 넘어간다(최대 한 바퀴).
+async function gatherPillarCandidates(
+  pillarOrder: (keyof typeof SEED_PILLARS)[],
+  exclusion: ExclusionList,
+  pool: SeedSuggestions[]
+) {
+  for (const pillar of pillarOrder) {
+    const suggestions = await gatherSuggestions(SEED_PILLARS[pillar]);
+    pool.push(...suggestions);
+    const all = buildCandidates(suggestions);
+    const candidates = all.filter((c) => !isDuplicateKeyword(c.keyword, exclusion));
+    log(`[${pillar}] Built ${all.length} unique candidates, filtered out ${all.length - candidates.length}. ${candidates.length} remain.`);
+    if (candidates.length > 0) return { pillar, candidates };
+    console.warn(`  ⚠️  No non-duplicate candidates for pillar "${pillar}"`);
+  }
+  throw new Error('No non-duplicate candidates available. Try expanding seed pool.');
 }
 
 // =========================== Run Recording ===========================
@@ -313,9 +347,10 @@ selected_keyword는 위 키워드 그대로 (변형 금지). 표기 규칙(영�
 
 async function runMarketing(
   candidates: Candidate[],
-  exclusion: ExclusionList
+  exclusion: ExclusionList,
+  pillar: string
 ): Promise<MarketingOutput> {
-  const top = candidates.slice(0, 50);
+  const top = sampleBySeed(candidates, 50);
   const candidatesText = top
     .map((c, i) => `${i + 1}. ${c.keyword} (시드: ${c.seed})`)
     .join('\n');
@@ -332,7 +367,9 @@ ${exclusion.titles.slice(0, 30).map((t, i) => `${i + 1}. ${t}`).join('\n') || '(
 ${exclusion.keywords.slice(0, 30).map((k, i) => `${i + 1}. ${k}`).join('\n') || '(없음)'}`
       : '';
 
-  const userPrompt = `${buildCurrentContext()}[후보 키워드 ${top.length}개]
+  const userPrompt = `${buildCurrentContext()}오늘의 기둥: ${pillar} — 이 기둥 주제만
+
+[후보 키워드 ${top.length}개]
 ${candidatesText}${exclusionText}`;
 
   log('🎯 Marketing agent — selecting topic...');
@@ -346,9 +383,6 @@ ${candidatesText}${exclusionText}`;
     log,
   });
   log(`  ✓ Marketing selected: "${result.selected_keyword}" (pillar: ${result.pillar})`);
-  if (result.pillar === OFF_PILLAR) {
-    console.warn(`  ⚠️  Marketing picked an off-pillar keyword from autocomplete candidates`);
-  }
   log(`  ✓ Angle: ${result.angle.slice(0, 100)}${result.angle.length > 100 ? '...' : ''}`);
   return result;
 }
@@ -513,6 +547,9 @@ async function main() {
   await reporter.start();
   await reporter.update({ marketing: { status: 'in-progress' } });
 
+  const pillarOrder = pillarOrderForToday();
+  log(`📅 Today's pillar: ${pillarOrder[0]} (KST day rotation; order ${pillarOrder.join(' → ')})`);
+
   // 우선순위 결정: manual queue → trending topic → autocomplete fallback.
   // 앞 단계에서 고정 키워드가 잡히면 Marketing은 autocomplete를 건너뛰고 그 키워드로 브리핑만 작성.
   let manualQueueId: number | null = null;
@@ -535,11 +572,11 @@ async function main() {
     console.warn('Manual queue check failed (non-fatal):', e);
   }
 
-  // 1. Trending topic (manual이 없으면)
+  // 1. Trending topic (manual이 없으면) — refresh-trending이 오늘 기둥으로 적재한 것만 claim
   if (!fixedKeyword) {
     try {
-      const { data: topics, error: topicErr } = await supabase.rpc('claim_next_trending_topic');
-      if (topicErr) console.warn('claim_next_trending_topic failed (non-fatal):', topicErr.message);
+      const { data: topics, error: topicErr } = await supabase.rpc('claim_next_trending_topic_for_pillar', { p_pillar: pillarOrder[0] });
+      if (topicErr) console.warn('claim_next_trending_topic_for_pillar failed (non-fatal):', topicErr.message);
       if (topics && Array.isArray(topics) && topics.length > 0) {
         trendingTopicId = topics[0].id;
         currentTrendingTopicId = trendingTopicId;
@@ -579,19 +616,43 @@ async function main() {
 
   let marketing: MarketingOutput | null = null;
   const pool: SeedSuggestions[] = [];
-  const exclusion: ExclusionList = { titles: [], keywords: [] };
+
+  log(`Fetching recent topics (last ${DEDUP_LOOKBACK_DAYS} days) to avoid duplicates...`);
+  const exclusion = await fetchRecentTopics(DEDUP_LOOKBACK_DAYS);
+  log(`  ✓ ${exclusion.titles.length} recent posts, ${exclusion.keywords.length} recent keywords`);
+
+  // 고정 키워드도 같은 중복 검사를 받는다.
+  // 수동 큐는 관리자가 직접 넣은 것이라 경고만 하고 진행, 트렌딩은 off-pillar와 같은 방식으로
+  // failed 처리 후 autocomplete로 넘긴다 (Marketing 호출 전에 걸러 시간도 아낀다).
+  if (fixedKeyword && isDuplicateKeyword(fixedKeyword, exclusion)) {
+    if (manualQueueId !== null) {
+      console.warn(`  ⚠️  Manual queue keyword "${fixedKeyword}" overlaps a post/keyword from the last ${DEDUP_LOOKBACK_DAYS} days — using it anyway`);
+    } else {
+      log(`🚫 "${fixedKeyword}" overlaps a recent post/keyword (trending topic) — skipping, falling back to autocomplete`);
+      await recordFailure('Duplicate fixed keyword skipped (trending topic)', fixedKeyword, null, { trendingTopicId });
+      try { await supabase.rpc('mark_trending_topic_failed', { topic_id: trendingTopicId }); }
+      catch (e) { console.warn('mark_trending_topic_failed failed:', e); }
+      trendingTopicId = null;
+      currentTrendingTopicId = null;
+      fixedKeyword = null;
+    }
+  }
 
   if (fixedKeyword) {
-    // 고정 키워드 모드 (manual 또는 trending) — autocomplete/dedup 건너뛰고 Marketing이 브리핑만 작성
+    // 고정 키워드 모드 (manual 또는 trending) — autocomplete 건너뛰고 Marketing이 브리핑만 작성
     const brief = await runMarketingWithFixedKeyword(fixedKeyword, fixedHint);
     log(`  ✓ Pillar: ${brief.pillar}`);
 
     // 고정 키워드는 후보 선정 단계를 건너뛰므로 네 기둥 회피 규칙이 적용되지 않는다.
     // 트렌딩 분류(refresh-trending)를 통과한 영상이라도 Gemini 제안 제목이 기둥 밖으로
     // 새는 경우가 있어, 브리핑 단계에서 한 번 더 걸러 autocomplete로 넘긴다.
-    if (brief.pillar === OFF_PILLAR) {
+    // 트렌딩은 오늘 기둥 영상만 claim하지만 제안 제목이 다른 기둥으로 갈 수 있어 오늘 기둥이 아니어도 넘긴다.
+    // 수동 큐는 관리자가 고른 것이라 기둥 밖일 때만 넘긴다(오늘 기둥 무관).
+    const notToday = trendingTopicId !== null && brief.pillar !== pillarOrder[0];
+    if (brief.pillar === OFF_PILLAR || notToday) {
       const source = manualQueueId !== null ? 'manual queue' : 'trending topic';
-      log(`🚫 "${fixedKeyword}" is outside the four pillars (${source}) — skipping, falling back to autocomplete`);
+      const why = brief.pillar === OFF_PILLAR ? 'outside the four pillars' : `${brief.pillar}, not today's pillar ${pillarOrder[0]}`;
+      log(`🚫 "${fixedKeyword}" is ${why} (${source}) — skipping, falling back to autocomplete`);
       await recordFailure(`Off-pillar fixed keyword skipped (${source})`, fixedKeyword, null, {
         marketing: brief,
         manualQueueId,
@@ -615,26 +676,28 @@ async function main() {
   }
 
   if (!marketing) {
-    // 2. Autocomplete fallback (기존 흐름)
-    const fetchedPool = await gatherSuggestions();
-    pool.push(...fetchedPool);
-    const allCandidates = buildCandidates(pool);
-    log(`Built ${allCandidates.length} unique candidates`);
+    // 2. Autocomplete fallback — 오늘 기둥의 시드만 쓴다(후보가 없으면 다음 기둥)
+    const { pillar, candidates: pillarCandidates } = await gatherPillarCandidates(pillarOrder, exclusion, pool);
+    let candidates = pillarCandidates;
 
-    log(`Fetching recent topics (last ${DEDUP_LOOKBACK_DAYS} days) to avoid duplicates...`);
-    const fetchedExclusion = await fetchRecentTopics(DEDUP_LOOKBACK_DAYS);
-    exclusion.titles = fetchedExclusion.titles;
-    exclusion.keywords = fetchedExclusion.keywords;
-    log(`  ✓ ${exclusion.titles.length} recent posts, ${exclusion.keywords.length} recent keywords`);
+    marketing = await runMarketing(candidates, exclusion, pillar);
 
-    const candidates = filterDuplicateCandidates(allCandidates, exclusion);
-    log(`Filtered out ${allCandidates.length - candidates.length}. ${candidates.length} candidates remain.`);
-
-    if (candidates.length === 0) {
-      throw new Error('No non-duplicate candidates available. Try expanding seed pool.');
+    // 기둥 밖(해당없음)이거나 오늘 기둥이 아닌 키워드를 골랐으면 제외 목록 맨 앞에 넣고
+    // (프롬프트 회피 목록 30개 안에 들도록) 재선정. 재시도 후에도 그러면 그날 글이 사라지지 않게 경고만 남기고 진행한다.
+    for (let retry = 1; marketing.pillar !== pillar && retry <= OFF_PILLAR_RETRIES; retry++) {
+      log(`🚫 "${marketing.selected_keyword}" is ${marketing.pillar}, not today's pillar ${pillar} — re-selecting (${retry}/${OFF_PILLAR_RETRIES})`);
+      exclusion.keywords.unshift(marketing.selected_keyword);
+      candidates = candidates.filter((c) => !isDuplicateKeyword(c.keyword, exclusion));
+      if (candidates.length === 0) break;
+      marketing = await runMarketing(candidates, exclusion, pillar);
     }
-
-    marketing = await runMarketing(candidates, exclusion);
+    if (marketing.pillar !== pillar) {
+      console.warn(`  ⚠️  Marketing picked a ${marketing.pillar} keyword instead of today's pillar ${pillar}`);
+    }
+    // 프롬프트 회피 목록은 30개만 보이므로 Marketing이 후보 밖 키워드를 고르면 180일 중복이 샐 수 있다.
+    if (isDuplicateKeyword(marketing.selected_keyword, exclusion)) {
+      console.warn(`  ⚠️  "${marketing.selected_keyword}" overlaps a post/keyword from the last ${DEDUP_LOOKBACK_DAYS} days`);
+    }
   }
 
   await reporter.update({
